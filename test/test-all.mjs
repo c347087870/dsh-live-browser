@@ -17,9 +17,14 @@ import { testBrowserConfig } from './browser-config.mjs'
 const here = dirname(fileURLToPath(import.meta.url))
 const only = process.argv.slice(2)
 
-/** Suites that need a live page, and therefore a browser on the debug port. */
+/**
+ * Suites that still need a real browser on the debug port.
+ *
+ * test-bridge-e2e and the DOM behaviour suite used to be here; both now run
+ * against jsdom, so they are no longer gated on a browser.
+ */
 const needsBrowser = (name) =>
-  ['test-agent-script.mjs', 'test-bridge-e2e.mjs', 'test-chart-capture.mjs', 'test-scenarios.mjs'].includes(name)
+  ['test-chart-capture.mjs', 'test-scenarios.mjs'].includes(name)
 
 /** Probe the debug port without launching anything. */
 const probeBrowser = async () => {
