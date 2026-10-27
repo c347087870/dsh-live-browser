@@ -239,6 +239,11 @@ node test/test-rpc-http.mjs "http://127.0.0.1:PORT/?token=..."
 Paths for the test browser can be overridden with `DSH_TEST_CDP_PORT`,
 `DSH_TEST_PROFILE_DIR` and `DSH_TEST_DOWNLOAD_DIR`.
 
+> After editing the source locally, **DSH must be restarted**: host plugin tool
+> registration happens only at process start, so file changes do not take effect.
+> Until the restart, the `browser_*` tools and the `/dsh-live-browser` route do not
+> exist (an HTTP 405 from that route is the signal that it is not loaded).
+
 ## Publish
 
 The plugin is installable straight from GitHub or npm with no registry step. To
