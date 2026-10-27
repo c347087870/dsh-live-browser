@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Test scratch space
+tmp-*/
+test-fixtures/.cache/
+
+# Screenshots and downloads the plugin writes at runtime
+images/
+*.png
+!docs/**/*.png
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/
+
+# Local environment overrides
+.env
+.env.local

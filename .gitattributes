@@ -1,0 +1,13 @@
+# Keep line endings stable across platforms: the plugin ships JS that DSH reads
+# directly, and a Windows checkout must not silently rewrite every file.
+* text=auto eol=lf
+
+# Batch and PowerShell scripts are the exception; Windows tools expect CRLF.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.ico binary
