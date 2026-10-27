@@ -1,26 +1,24 @@
-# Dependencies
+# 依赖
 node_modules/
-# npm 閿佹枃浠讹細鏈粨搴撶敤 pnpm锛岃繖涓枃浠跺彧鏄湰鍦板畨瑁呮祴璇曚緷璧栨椂浜х敓鐨?package-lock.json
+# npm 锁文件：本仓库用 pnpm，这个文件只是本地装测试依赖时产生的
+package-lock.json
 
-# Test scratch space
+# 测试临时文件
 tmp-*
-tmp-msg.txt
-tmp-api-body.json
-tmp-*.mjs
 test-fixtures/.cache/
 
-# Screenshots and downloads the plugin writes at runtime
+# 截图与下载：插件运行时写入的东西
 images/
 *.png
 !docs/**/*.png
 
-# Editor and OS noise
+# 编辑器与系统噪音
 .DS_Store
 Thumbs.db
 *.log
 .vscode/
 .idea/
 
-# Local environment overrides
+# 本地环境覆盖
 .env
 .env.local
