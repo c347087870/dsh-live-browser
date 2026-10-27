@@ -126,6 +126,32 @@ console.log('\n--- switching chats mid-request keeps the binding -------------')
   bridge.close()
 }
 
+console.log('\n--- 冷启动：面板还没绑定会话时不能死锁 ----------------------')
+
+{
+  // 侧边栏渲染出 data-sidebar-right-session 之前，客户端上报的会话是空的。
+  // 这个窗口正是第一条命令到达的时候：如果拒绝，就形成死锁——标签页要等命令
+  // 被接受才开，而命令要等标签页开了才被接受。
+  const bridge = new BrowserBridge({ timeoutMs: 2000 })
+  bridge.poll('panel-cold', undefined)
+
+  check('未绑定会话的面板也视为已连接', bridge.attachedTo('session-A') === true)
+
+  const pending = bridge.call('navigate', { url: 'https://cold.test' }, { sessionId: 'session-A', panelWaitMs: 0 })
+  const command = bridge.poll('panel-cold', 'session-A')
+  check('冷启动时命令能被未绑定面板接住', command?.method === 'navigate', JSON.stringify(command))
+  settleOk(bridge, 'panel-cold', command, { url: 'https://cold.test' })
+  const result = await pending
+  check('冷启动的命令能正常拿到结果', result.url === 'https://cold.test', JSON.stringify(result))
+
+  // 一旦面板绑定到 A，B 仍然拿不到它。
+  bridge.poll('panel-cold', 'session-A')
+  check('绑定之后 A 仍被识别', bridge.attachedTo('session-A') === true)
+  check('绑定之后 B 不再被认为已连接', bridge.attachedTo('session-B') === false)
+
+  bridge.close()
+}
+
 console.log('\n--- a closed panel stops being authoritative ------------------')
 
 {
