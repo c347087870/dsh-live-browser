@@ -257,6 +257,20 @@ npm run strip-bom     # 扫掉全仓库文本文件的 BOM
 这几个行为里有三个曾经是真 bug：pointer 事件根本没派发、编辑键只发 keydown
 不改值、修饰键被模板字符串的反斜杠吞掉导致 `Control+a` 解析成 `+a`。
 
+### 开发脚本
+
+`scripts/` 下这几个只在开发和维护时用，发布产物里不含它们：
+
+| 脚本 | 用途 |
+| --- | --- |
+| `ensure-browser.mjs` | 起一个测试用的 Chrome，供需要真实页面的套件使用 |
+| `strip-bom.mjs` | 扫掉全仓库文本文件的 BOM（见上节，DSH 会因此拒绝安装） |
+| `verify-in-browser.mjs` | 生成内置浏览器实机验证用的页面，`--serve` 起本地服务，`--check` 自检 |
+| `audit-tools.mjs` | 核对「工具 → 方法 → 客户端处理器」这条链有没有断的 |
+| `audit-plugins.mjs` | 扫一遍本地 profile 里装了哪些插件、版本与兼容性 |
+| `wrap-client-iife.mjs` | 把客户端 bundle 包成 IIFE，避免与同页其他插件顶层声明撞名 |
+| `verify-isolation.mjs` | 验证包成 IIFE 后，与别的插件声明混在同一个 script 里仍能解析 |
+
 ## 发布
 
 插件可以直接从 GitHub 或 npm 安装，不需要任何注册步骤。如果要被那些索引 GitHub 的社区
