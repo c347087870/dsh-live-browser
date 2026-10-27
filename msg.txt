@@ -1,0 +1,17 @@
+修复 browser_open_panel 在「面板在线但没有页面」时什么都不做的问题
+
+原来 browser_open_panel 只要 bridge.attached 为真就直接返回
+"面板已经打开"，但 attached 只说明客户端在轮询，并不说明侧边栏真的有
+浏览器标签页。这次实测就卡在这里：面板已连接（attached=true），
+page 却是 null，调用 browser_open_panel 直接被告知"已经打开"，于是永远
+没有页面可驱动。
+
+现在改成先问一次 tabs：真的取到标签页才返回"已经打开"，否则继续走
+openTab 把标签页开出来。判断不出来时也倾向于开一个，而不是让调用方
+卡在半路。
+
+同时补了回归测试（test-tools.mjs），构造"客户端在轮询、tabs 返回空"
+的状态，断言此时仍然会调用 openTab，且不会回答"面板已经打开"。
+
+另外 test-package-integrity.mjs 补上了按 DSH 的读法校验本包、用
+node --check 检查所有 JS 文件语法、逐个确认运行时文件存在三项检查。

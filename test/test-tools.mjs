@@ -65,6 +65,55 @@ check('status endpoint works', statusEndpoint.ok === true && statusEndpoint.valu
 const unknown = await handleEndpoint(bridge, 'nope', {})
 check('unknown endpoint is a clean protocol error', unknown.ok === false)
 
+// ---------------------------------------------------------------------------
+// browser_open_panel: 面板在线但没有页面时，必须真的去开一个标签页
+// ---------------------------------------------------------------------------
+
+{
+  // 造一个「客户端在轮询、但侧边栏没有页面」的状态：面板已登记，tabs 返回空。
+  const panelTools = []
+  const panelCtx = {
+    logger: { info() {}, warn() {}, debug() {} },
+    tools: { register: (definition) => panelTools.push(definition) },
+    get: () => undefined,
+  }
+  const panelBridge = new BrowserBridge({ timeoutMs: 400 })
+  let opens = 0
+  registerBrowserTools(panelCtx, {}, panelBridge, {
+    imageDir: process.env.TEMP ?? '.',
+    readUpload: async () => ({ name: 'a', type: 'text/plain', base64: '' }),
+    downloads: async () => ({ files: [] }),
+    openTab: async () => { opens += 1; return { opened: true } },
+  })
+
+  // 让面板登记，使 bridge.attached 变为 true，模拟「客户端在线」。
+  panelBridge.poll('p-online')
+
+  const openPanel = panelTools.find((tool) => tool.name === 'browser_open_panel')
+  // 一个永不回结果的调用会一直等到超时；这里用很短的面板等待，靠异常路径
+  // 走到「无法判断就继续开」的分支。
+  const call = openPanel.execute({ url: 'http://example.test/' }, {})
+  // 同时把队列里的 tabs 命令取走并回一个空结果，模拟“没有页面”。
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const command = panelBridge.poll('p-online')
+    if (command !== null) {
+      if (command.method === 'tabs') {
+        panelBridge.settle('p-online', command.id, { ok: true, value: { tabs: [] } })
+      } else {
+        panelBridge.settle('p-online', command.id, { ok: true, value: {} })
+      }
+    }
+    const raced = await Promise.race([call, new Promise((resolve) => setTimeout(() => resolve(undefined), 20))])
+    if (raced !== undefined) {
+      check('面板在线但没有页面时仍然打开标签页', opens === 1, `opens=${opens} result=${JSON.stringify(raced)}`)
+      check('这种情况不应回答「已经打开」', raced.reason !== '面板已经打开', JSON.stringify(raced))
+      break
+    }
+  }
+
+  panelBridge.close()
+}
+
 bridge.close()
 console.log(failures.length === 0 ? '\nTOOL LAYER OK' : `\nTOOL LAYER FAILED (${failures.length})`)
 process.exit(failures.length === 0 ? 0 : 1)

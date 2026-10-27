@@ -13,6 +13,7 @@
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
+import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -149,6 +150,55 @@ function collectTextFiles(dir, found = []) {
     if (/console\.log\(/.test(text)) noisy.push(file)
   }
   check('运行时代码里没有 console.log 残留', noisy.length === 0, noisy.join(', '))
+}
+
+// ---------------------------------------------------------------------------
+// 复刻 DSH 安装后的校验：每个发布文件都必须能被它原样读完
+// ---------------------------------------------------------------------------
+
+{
+  const parsed = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+
+  // DSH 的 plugin-manager 在安装后逐个读依赖包的 package.json，用的正是
+  // JSON.parse(readFileSync(path, "utf8"))。BOM 在这一步会让它抛错并回滚安装，
+  // 所以这里照同样的方式读一遍。
+  let validationError
+  try {
+    const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+    if (typeof manifest.dsh?.bundle?.patch !== 'string') {
+      throw new Error('dsh.bundle.patch 缺失，DSH 不会把它当组合包')
+    }
+  } catch (error) {
+    validationError = String(error.message)
+  }
+  check('按 DSH 的读法能校验通过本包', validationError === undefined, validationError)
+
+  // 所有 JS 文件都要能被 Node 解析成合法源码，否则装上也加载不了。
+  // 用 node --check 而不是 new Function：这些文件是 ESM，含 import.meta 和
+  // 顶层 await，Function 构造器看不懂。
+  const jsFiles = collectTextFiles(root).filter((path) => /\.(js|mjs)$/.test(path))
+  const broken = []
+  for (const path of jsFiles) {
+    const outcome = spawnSync(process.execPath, ['--check', path], { encoding: 'utf8' })
+    if (outcome.status !== 0) {
+      const firstLine = String(outcome.stderr ?? '').split('\n').find((line) => line.includes('Error')) ?? '语法错误'
+      broken.push(`${relative(root, path)}: ${firstLine.trim()}`)
+    }
+  }
+  check('发布范围内的 JS 文件语法可通过', broken.length === 0, broken.slice(0, 3).join(' | '))
+
+  // 声明为「需要浏览器」之外的运行时文件，一个都不能少。
+  for (const file of ['lib/index.js', 'lib/tools.js', 'lib/rpc.js', 'lib/bridge.js', 'lib/agent-script.js', 'lib/config.js', 'lib/schema.js', 'lib/skills.js', 'client.js']) {
+    let exists = false
+    try {
+      exists = statSync(join(root, file)) !== undefined
+    } catch {
+      exists = false
+    }
+    check(`运行时文件 ${file} 存在`, exists)
+  }
+
+  void parsed
 }
 
 console.log(failures.length === 0 ? '\n包完整性 OK' : `\n包完整性失败（${failures.length}）`)
