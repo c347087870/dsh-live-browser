@@ -53,14 +53,10 @@ async function page(html) {
 
 {
   const { run, read } = await page('<button id="p">pointer</button>')
-  const seen = []
   for (const type of ['pointerover', 'pointerenter', 'pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click']) {
     read(`document.getElementById('p').addEventListener('${type}', () => window.__seen.push('${type}'))`)
   }
-  const { window } = await Promise.resolve({ window: null })
-  void window
-  const ordered = []
-  read("window.__seen = []")
+  read('window.__seen = []')
   run('click', { selector: '#p' })
   const recorded = read('window.__seen.join(",")')
   check('click dispatches pointerdown', String(recorded).includes('pointerdown'), recorded)
@@ -69,6 +65,33 @@ async function page(html) {
   check('click still dispatches mouseup', String(recorded).includes('mouseup'), recorded)
   check('click fires the click event', String(recorded).includes('click'), recorded)
   check('pointerdown precedes mouseup', String(recorded).indexOf('pointerdown') < String(recorded).indexOf('mouseup'), recorded)
+}
+
+// A click has to reach the page's own handler, not just fire an event object:
+// a button whose onclick updates the DOM is the common case.
+{
+  const { run, read } = await page(`
+    <button id="act">Go</button>
+    <div id="out">idle</div>
+    <script>
+      document.getElementById('act').addEventListener('click', () => {
+        document.getElementById('out').textContent = 'ran'
+      })
+    </script>`)
+  run('click', { selector: '#act' })
+  check('click runs the page handler', read("document.getElementById('out').textContent") === 'ran', read("document.getElementById('out').textContent"))
+}
+
+// Installation reports itself, so a caller can tell whether the script is live.
+{
+  const dom = new JSDOM('<!doctype html><html><body><p>x</p></body></html>', {
+    runScripts: 'dangerously',
+    pretendToBeVisual: true,
+    virtualConsole: new VirtualConsole(),
+  })
+  const result = dom.window.eval(AGENT_SOURCE)
+  check('the script reports itself as installed', result?.installed === true, JSON.stringify(result))
+  check('state reports the current url', typeof dom.window.__dshBrowserAgent.state().url === 'string', dom.window.__dshBrowserAgent.state().url)
 }
 
 // A listener bound only to pointerdown is what a drag library uses.
