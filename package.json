@@ -1,4 +1,4 @@
-﻿{
+{
     "name":  "dsh-live-browser",
     "version":  "0.3.0",
     "description":  "Drive DSH\u0027s own sidebar browser: real \u003cwebview\u003e rendering plus an injected command surface so the agent can click, type, read and scroll the page the human is looking at.",
