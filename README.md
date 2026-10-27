@@ -238,6 +238,25 @@ npm run strip-bom     # 扫掉全仓库文本文件的 BOM
 `test/test-package-integrity.mjs` 也会检查这一点，并核对 `files` 里声明的每个文件是否
 真实存在、`exports` 指向的入口是否存在、运行时代码有没有 `console.log` 残留。
 
+### 在内置浏览器里实测
+
+凡是依赖真实渲染的行为，都在 DSH 侧边栏的内置浏览器里跑过一遍。做法是先
+`node scripts/verify-in-browser.mjs --serve` 起本地页面，再用 `browser_*` 工具驱动。
+
+结论（实测通过）：
+
+- **pointer 事件** —— 一次点击产生的序列是
+  `pointerover, pointerenter, pointerdown, mousedown, pointerup, mouseup, click`，
+  且每个事件恰好一次。只监听 `pointerdown` 的库（拖拽类、React 合成事件）也能收到。
+- **编辑键** —— Backspace 删一个字符、Shift+A 输入大写 A（不是 `+A`）、
+  Control+a 清空、Enter 在 textarea 里插入换行。
+- **contenteditable** —— `browser_type` 能写入，编辑键也能作用在可编辑 div 上。
+- **ref 生命周期** —— 连续多次 `browser_snapshot`，ref 数量稳定，不随快照次数增长。
+- **链接跳转** —— 点击 `<a>` 会真实导航，落点页面的标题与正文都变了。
+
+这几个行为里有三个曾经是真 bug：pointer 事件根本没派发、编辑键只发 keydown
+不改值、修饰键被模板字符串的反斜杠吞掉导致 `Control+a` 解析成 `+a`。
+
 ## 发布
 
 插件可以直接从 GitHub 或 npm 安装，不需要任何注册步骤。如果要被那些索引 GitHub 的社区
