@@ -7,10 +7,10 @@
  * after navigation, dispatching events frameworks listen for, shadow roots,
  * iframes, disabled controls, and pages that throw.
  */
-import { BrowserLauncher } from './test-fixtures/chrome.js'
+import { BrowserLauncher } from './fixtures/chrome.js'
 import { testBrowserConfig } from './browser-config.mjs'
-import { BrowserHub } from './test-fixtures/browser.js'
-import { AGENT_SOURCE } from './lib/agent-script.js'
+import { BrowserHub } from './fixtures/browser.js'
+import { AGENT_SOURCE } from '../lib/agent-script.js'
 
 const cfg = testBrowserConfig
 const hub = new BrowserHub(cfg, new BrowserLauncher(cfg), { info() {}, warn() {}, debug() {} })

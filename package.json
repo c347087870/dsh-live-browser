@@ -40,7 +40,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node test-all.mjs"
+    "test": "node test/test-all.mjs"
   },
   "dependencies": {
     "schemastery": "^3.18.0"

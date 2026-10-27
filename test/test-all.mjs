@@ -44,8 +44,7 @@ if (wantedBrowser) {
     console.log(
       `browser: not running on port ${testBrowserConfig.debugPort} — page suites will be skipped`,
     )
-    console.log('  start one with: node scripts/ensure-browser.mjs')
-  } else {
+    console.log('  start one with: node scripts/ensure-browser.mjs')  } else {
     console.log(`browser: ${browser.Browser ?? 'running'}`)
   }
 }

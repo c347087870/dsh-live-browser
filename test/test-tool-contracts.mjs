@@ -6,8 +6,8 @@
  * marketplace plugin cannot ship a tool that throws when its precondition simply
  * is not met, so this drives every tool through its "nothing open" path.
  */
-import { BrowserBridge } from './lib/bridge.js'
-import { registerBrowserTools } from './lib/tools.js'
+import { BrowserBridge } from '../lib/bridge.js'
+import { registerBrowserTools } from '../lib/tools.js'
 
 const tools = []
 const ctx = {

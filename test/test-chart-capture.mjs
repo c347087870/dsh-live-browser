@@ -6,10 +6,10 @@
  * back a PNG data URL. The test proves that PNG is real, non-empty, and looks
  * like an image rather than a blank rectangle.
  */
-import { BrowserLauncher } from './test-fixtures/chrome.js'
+import { BrowserLauncher } from './fixtures/chrome.js'
 import { testBrowserConfig } from './browser-config.mjs'
-import { BrowserHub } from './test-fixtures/browser.js'
-import { AGENT_SOURCE } from './lib/agent-script.js'
+import { BrowserHub } from './fixtures/browser.js'
+import { AGENT_SOURCE } from '../lib/agent-script.js'
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 

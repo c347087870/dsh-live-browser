@@ -13,8 +13,8 @@
  * available for a late-arriving panel, and it fails only with an actionable
  * message. The client-side readiness logic is covered by test-client-driver.mjs.
  */
-import { BrowserBridge } from './lib/bridge.js'
-import { normalizeAddress } from './lib/tools.js'
+import { BrowserBridge } from '../lib/bridge.js'
+import { normalizeAddress } from '../lib/tools.js'
 
 const failures = []
 const check = (label, condition, detail) => {

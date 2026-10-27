@@ -6,7 +6,7 @@
  * per Session, so the fix is to carry the originating Session id on every
  * command and only hand it to a panel rendering that same Session.
  */
-import { BrowserBridge } from './lib/bridge.js'
+import { BrowserBridge } from '../lib/bridge.js'
 
 const failures = []
 const check = (label, condition, detail) => {

@@ -8,10 +8,10 @@
  * against a real page in real Chrome, so this proves the full path works end to
  * end; only the DSH <webview> host is replaced by a test harness.
  */
-import { BrowserBridge } from './lib/bridge.js'
-import { AGENT_SOURCE } from './lib/agent-script.js'
-import { BrowserHub } from './test-fixtures/browser.js'
-import { BrowserLauncher } from './test-fixtures/chrome.js'
+import { BrowserBridge } from '../lib/bridge.js'
+import { AGENT_SOURCE } from '../lib/agent-script.js'
+import { BrowserHub } from './fixtures/browser.js'
+import { BrowserLauncher } from './fixtures/chrome.js'
 import { testBrowserConfig } from './browser-config.mjs'
 
 const cfg = testBrowserConfig

@@ -5,10 +5,10 @@
  * be wrong or missing entirely, so they are asserted in isolation rather than
  * through a page.
  */
-import { BrowserBridge } from './lib/bridge.js'
-import { registerBrowserTools } from './lib/tools.js'
-import { resolveConfig, defaultDownloadsDir, defaultImageDir } from './lib/config.js'
-import { handleEndpoint, authorizeRequest } from './lib/rpc.js'
+import { BrowserBridge } from '../lib/bridge.js'
+import { registerBrowserTools } from '../lib/tools.js'
+import { resolveConfig, defaultDownloadsDir, defaultImageDir } from '../lib/config.js'
+import { handleEndpoint, authorizeRequest } from '../lib/rpc.js'
 
 const failures = []
 const check = (label, condition, detail) => {

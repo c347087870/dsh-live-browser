@@ -1,250 +1,217 @@
 # dsh-live-browser
 
-Let the agent drive the browser DSH already ships — inside DSH, with nothing
-leaving the window.
+让 agent 操作 DSH 自带的那个浏览器 —— 就在 DSH 里，什么都不离开窗口。
 
-[中文](README.zh-CN.md) | English
+中文 | [English](README.en.md)
 
-DSH's own `@deepseek-ai/dsh-client-ui-sidebar-browser` renders a real Electron
-`<webview>` in the right sidebar, with an address bar, history and an independent
-browser session. It exposes navigation only, so the agent can open a page but
-cannot click, type, read or scroll it.
+DSH 自带的 `@deepseek-ai/dsh-client-ui-sidebar-browser` 会在右侧栏渲染一个真正的
+Electron `<webview>`，带地址栏、历史记录和独立的浏览器会话。但它只开放了导航能力：
+agent 能打开页面，却点不了、输不进、读不到、滚不动。
 
-This plugin closes that gap **without modifying DSH**: it finds the guests that
-plugin mounted, injects a command surface into each document, and gives the model
-25 `browser_*` tools that operate the page the human is looking at.
+这个插件在**不修改 DSH 任何文件**的前提下补上这一段：找到官方插件挂载的那些 guest，
+往每个文档里注入一套操作接口，再给模型 25 个 `browser_*` 工具，操作的正是用户眼前那张页面。
 
-## Install
+## 安装
 
-Requires DSH 0.2.x and Node.js 20 or newer. The plugin declares its DSH bundle in
-`package.json`, so DSH registers it on install.
+需要 DSH 0.2.x 与 Node.js 20 以上。插件在 `package.json` 里声明了 DSH 组合包，安装时
+DSH 会自动注册。
 
-### From GitHub
+### 从 GitHub 安装
 
 ```bash
 # Web / CLI profile
 dsh plugin --profile web install c347087870/dsh-live-browser
 ```
 
-The desktop profile is owned by the Electron application, so install it from the
-UI instead: **Plugins → Add plugin**, paste
-`https://github.com/c347087870/dsh-live-browser`, then restart DSH.
+桌面版的 profile 由 Electron 应用独占，请从界面安装：**插件 → 添加插件**，粘贴
+`https://github.com/c347087870/dsh-live-browser`，然后重启 DSH。
 
-### From npm
+### 从 npm 安装
 
 ```bash
 dsh plugin --profile web install dsh-live-browser
 ```
 
-### Verify the install
+### 确认装好了
 
 ```bash
 node -e "const p=require('./node_modules/dsh-live-browser/package.json');console.log(p.version, p.dsh)"
 ```
 
-`dsh.bundle.patch` must be present, and `lib/index.js` must exist. After a
-restart the plugin logs
-`[dsh-live-browser] loaded: 25 tools, driving the DSH sidebar browser`.
+`dsh.bundle.patch` 必须存在，`lib/index.js` 必须存在。重启后日志里会出现
+`[dsh-live-browser] loaded: 25 tools, driving the DSH sidebar browser`。
 
-> A junction (`mklink /J`, `ln -s`) does **not** work for local development: Node
-> resolves the real path, so `schemastery` is looked up where the source lives
-> rather than in the profile. Copy the package directory, or install it with
-> `dsh plugin`.
+> 本地开发**不要**用 junction（`mklink /J`、`ln -s`）：Node 会解析真实路径，于是
+> `schemastery` 去源码目录找而不是去 profile 找。要么复制整个包目录，要么用
+> `dsh plugin` 安装。
 
-## Settings
+## 配置项
 
-DSH renders these on the plugin's settings card. Every one has a default, so the
-plugin works without touching any of them.
+DSH 会把这些渲染在插件的设置卡片里。每一项都有默认值，不动也能用。
 
-| Setting | Default | Meaning |
+| 配置 | 默认 | 含义 |
 |---|---|---|
-| `confirmSensitive` | `true` | Ask the user before an action marked `sensitive` |
-| `allowEval` | `true` | Allow `browser_eval` to run arbitrary JavaScript in the page |
-| `autoOpenPanel` | `true` | Open the sidebar browser when a command arrives with no page |
-| `commandTimeoutMs` | `30000` | How long one command may wait for the panel |
-| `openPanelWaitMs` | `8000` | How long to wait for a new panel to become ready |
-| `maxSnapshotNodes` | `400` | Default node cap for `browser_snapshot` |
-| `maxTextChars` | `12000` | Default character cap for `browser_read_text` |
-| `waitTimeoutMs` | `10000` | Default timeout for `browser_wait` |
-| `uploadMaxBytes` | `16777216` | Largest file `browser_upload` will hand to a page |
-| `imageDir` | empty | Where `browser_screenshot` writes PNGs; empty uses `~/.dsh/storages/dsh-live-browser/images` |
-| `downloadsDir` | empty | Directory `browser_downloads` lists; empty uses the system Downloads folder |
+| `confirmSensitive` | `true` | 标记为 `sensitive` 的动作执行前先问用户 |
+| `allowEval` | `true` | 是否允许 `browser_eval` 在页面里执行任意 JavaScript |
+| `autoOpenPanel` | `true` | 命令到达但没有页面时，自动打开侧边栏浏览器 |
+| `commandTimeoutMs` | `30000` | 单次命令等待面板执行的超时（毫秒） |
+| `openPanelWaitMs` | `8000` | 打开面板后等待其就绪的时间 |
+| `maxSnapshotNodes` | `400` | `browser_snapshot` 默认节点上限 |
+| `maxTextChars` | `12000` | `browser_read_text` 默认字符上限 |
+| `waitTimeoutMs` | `10000` | `browser_wait` 默认超时（毫秒） |
+| `uploadMaxBytes` | `16777216` | `browser_upload` 单个文件的上限 |
+| `imageDir` | 空 | `browser_screenshot` 的图片目录；留空用 `~/.dsh/storages/dsh-live-browser/images` |
+| `downloadsDir` | 空 | `browser_downloads` 读取的目录；留空用系统「下载」文件夹 |
 
-`allowEval: false` is the switch to reach for if you want the agent to read pages
-without running code in them. `browser_eval` then returns `executed: false` and
-points at `browser_snapshot` / `browser_read_text` instead.
+想让 agent 只读页面、不在页面里跑代码，就把 `allowEval` 关掉。`browser_eval` 随后
+返回 `executed: false`，并提示改用 `browser_snapshot` / `browser_read_text`。
 
-## Opening the browser
+## 浏览器会自己打开
 
-The agent never asks you to open a browser first, and it never reaches for an
-external window:
+agent 不会先让你去开浏览器，也永远不会去开外部窗口：
 
-- Tools queue a command on the host, tagged with the **conversation** that asked.
-- The plugin's client bundle polls continuously, even when no browser tab exists.
-- If a command arrives with no page on screen, the client opens the **DSH sidebar
-  browser** itself (the same `openTabIn(sessionId, 'browser', …)` call the sidebar
-  uses internally), waits for the guest to mount, then runs the command.
+- 工具把命令排进宿主队列，并标记它来自**哪个对话**。
+- 插件的客户端 bundle 一直在轮询，即使当前一个浏览器标签页都没有。
+- 命令到达时如果没有页面，客户端会自己调用侧边栏的
+  `openTabIn(sessionId, 'browser', …)` 打开浏览器标签页，等 guest 挂载好再执行。
 
-So `browser_navigate` on a cold start shows up as a sidebar tab that opens by
-itself and loads the requested page.
+所以冷启动时一句 `browser_navigate`，表现就是右侧栏自己弹出一个标签页并加载目标地址。
 
-### One browser per conversation
+### 一个对话一个浏览器
 
-DSH keeps a separate sidebar per Session, and this plugin respects that:
+DSH 每个 Session 一个侧边栏，插件遵守这个边界：
 
-- Every command carries the Session id of the chat that issued it
-  (`exec.agent.session.id` on the host).
-- A panel only receives commands belonging to its own Session, so a second chat's
-  sidebar polling at the same time cannot steal them.
-- When the browser has to be opened, it opens in the **requesting** chat via
-  `openTabIn(sessionId, …)`, not in whichever chat happens to be on screen.
+- 每条命令都带着发起它的 Session id（宿主侧取 `exec.agent.session.id`）。
+- 面板只收到属于自己 Session 的命令，别的对话的面板同时在轮询也抢不走。
+- 需要打开浏览器时，用 `openTabIn(sessionId, …)` 在**发起请求的那个对话**里打开，
+  而不是在屏幕上恰好显示的那个对话里。
 
-That is what stops the old failure mode: ask for a page in chat A, switch to chat
-B before it opens, and find the browser in B.
+这消除了老的故障模式：在 A 对话要页面，没等它出来就切到 B，结果浏览器出现在 B。
 
-> Why the renderer does the opening: the sidebar lives entirely in the client —
-> its host module contributes nothing — so there is no host service to call. The
-> client half publishes `sidebarRight` through `ctx.reflect.provide`, which is
-> what this plugin uses.
+> 为什么打开动作放在渲染层：侧边栏整个在客户端，它的宿主模块什么都不贡献，所以没有
+> 宿主服务可调。客户端那一半通过 `ctx.reflect.provide` 发布 `sidebarRight`，插件用的就是这个。
 
-## Why this shape
+## 为什么用这个形态
 
-| | This plugin | Patching the shipped bundle |
+| | 本插件 | 直接改官方 bundle |
 |---|---|---|
-| Click / type / read / scroll | yes | yes |
-| Export a page's charts as PNG | yes, via the page's own canvas/SVG | yes |
-| Native window screenshots | no | yes |
-| Survives a DSH upgrade | yes | no — re-patch every release |
-| Risk to existing features | none | can break sidebar link handling |
+| 点击 / 输入 / 读取 / 滚动 | 可以 | 可以 |
+| 把页面图表导成 PNG | 可以，用页面自己的 canvas/SVG | 可以 |
+| 截原生窗口 | 不行 | 可以 |
+| 经得起 DSH 升级 | 可以 | 不行，每个版本都要重打补丁 |
+| 对现有功能的风险 | 无 | 可能破坏侧边栏的链接处理 |
 
-## How it works
+## 工作原理
 
 ```
-agent tool call
+工具调用
       │  bridge.call(method, params)          lib/bridge.js
       ▼
-  command queue  ──────►  panel long-polls   client.js
-                                │
-                                ├─ no guest yet → open the sidebar browser
-                                ├─ page commands  → injected script in the guest
-                                ├─ browser commands → guest element (loadURL/goBack…)
-                                └─ tab commands   → sidebar service
-                                │
-                          settle(result)
-                                ▼
-                        tool result
+   命令队列  ──────►  面板长轮询              client.js
+                          │
+                          ├─ 还没有 guest → 打开侧边栏浏览器
+                          ├─ 页面命令     → 注入到 guest 里的脚本
+                          ├─ 浏览器命令   → guest 元素本身（loadURL/goBack…）
+                          └─ 标签页命令   → 侧边栏服务
+                          │
+                    settle(result)
+                          ▼
+                      工具结果
 ```
 
-- **`lib/bridge.js`** — the queue and the long poll. Cold calls stay queued long
-  enough for the client to open a tab; a call that never gets a panel fails with
-  an actionable message instead of hanging.
-- **`lib/agent-script.js`** — the script injected into every guest document. Pure
-  DOM: snapshot with stable `ref`s, click, type, press, select, hover, scroll,
-  read text, evaluate, wait, attach files, capture canvas/SVG to PNG.
-- **`lib/rpc.js`** — one prefix route on the DSH web server (`/dsh-live-browser`)
-  speaking the panel's small request/response envelope. Every request is checked
-  for a same-origin browser and loopback host, because the route can write files
-  (`saveImage`) and read them (`readUpload`).
-- **`lib/config.js` / `lib/schema.js`** — the settings values and the form DSH
-  renders. Values are dependency-free so the tool layer and tests can read them
-  without a `node_modules` tree.
-- **`client.js`** — finds `webview[data-sidebar-browser-frame="webview"]`, injects
-  the script, opens the tab when needed, and runs the poll loop. IIFE-wrapped:
-  DSH batches plugin bundles into one combo `<script>`, so a top-level `const`
-  would collide with a sibling.
+- **`lib/bridge.js`** —— 队列与长轮询。冷调用会在队列里留够时间让客户端把标签页开出来；
+  始终等不到面板的调用会带着可操作的提示失败，而不是一直挂着。
+- **`lib/agent-script.js`** —— 注入每个 guest 文档的脚本。纯 DOM：带稳定 `ref` 的快照、
+  点击、输入、按键、选择、悬停、滚动、读正文、执行表达式、等待、附加文件、canvas/SVG 转 PNG。
+- **`lib/rpc.js`** —— 挂在 DSH web server 上的一个前缀路由（`/dsh-live-browser`），说面板那套
+  简单的请求/响应信封。每个请求都校验同源与回环主机，因为这个路由既能写文件（`saveImage`）
+  也能读文件（`readUpload`）。
+- **`lib/config.js` / `lib/schema.js`** —— 配置值与 DSH 渲染的表单。取值部分不依赖第三方包，
+  所以工具层和测试不需要 `node_modules` 就能跑。
+- **`client.js`** —— 找到 `webview[data-sidebar-browser-frame="webview"]`，注入脚本，
+  需要时打开标签页，跑轮询循环。整体包在 IIFE 里：DSH 会把多个插件 bundle 塞进同一个
+  combo `<script>`，顶层 `const` 会跟邻居撞名。
 
-### Why not `connection.rpc.handle`
+### 为什么不用 `connection.rpc.handle`
 
-On dsh 0.2.1-rc.2 that API builds its route with
-`owner.effect(() => owner.webServer.register(route))`, where `owner` is the
-connection plugin's own context — which never declared a `webServer` dependency.
-The property read throws `cannot get property "webServer" without inject`, the
-effect swallows it, and every panel request falls through to the static frontend
-fallback as **HTTP 405**. Registering on `webServer` directly is the same call
-without the broken indirection.
+在 dsh 0.2.1-rc.2 上，这个 API 用
+`owner.effect(() => owner.webServer.register(route))` 建路由，而 `owner` 是 connection
+插件自己的 context —— 它从没声明过 `webServer` 依赖。于是属性读取抛
+`cannot get property "webServer" without inject`，effect 把错误吞掉，面板请求全部落到
+静态前端兜底，表现为 **HTTP 405**。直接在 `webServer` 上注册是同一个调用，只是绕开了
+那层坏掉的间接。
 
-## Tools
+## 工具
 
-| Tool | Purpose |
+| 工具 | 作用 |
 |---|---|
-| `browser_status` | Is the panel open, what page is showing |
-| `browser_open_panel` | Open the sidebar browser (also happens automatically) |
-| `browser_navigate` / `back` / `forward` / `reload` | Navigation |
-| `browser_snapshot` | Accessibility-style node list with stable `ref`s |
-| `browser_read_text` | Visible body text, optionally scoped by selector |
-| `browser_click` / `type` / `press` / `select` / `hover` | Page interaction |
-| `browser_scroll` / `wait` | Scrolling and waiting |
-| `browser_eval` | Run a JS expression in the page |
-| `browser_screenshot` | Export a chart (canvas/SVG) or element as a PNG file |
-| `browser_tabs` / `tab_new` | List tabs, open a new browser tab |
-| `browser_upload` | Attach local files to a file input |
-| `browser_downloads` | List files in the downloads folder |
-| `browser_confirm` | Ask the human to confirm an irreversible action |
+| `browser_status` | 面板是否打开、当前是什么页面 |
+| `browser_open_panel` | 打开侧边栏浏览器（也会自动发生） |
+| `browser_navigate` / `back` / `forward` / `reload` | 导航 |
+| `browser_snapshot` | 无障碍风格的节点列表，带稳定 `ref` |
+| `browser_read_text` | 可见正文，可用选择器限定范围 |
+| `browser_click` / `type` / `press` / `select` / `hover` | 页面交互 |
+| `browser_scroll` / `wait` | 滚动与等待 |
+| `browser_eval` | 在页面里执行一段 JS 表达式 |
+| `browser_screenshot` | 把图表（canvas/SVG）或元素导出成 PNG |
+| `browser_tabs` / `tab_new` | 列出标签页、新建标签页 |
+| `browser_upload` | 给文件输入框附加本地文件 |
+| `browser_downloads` | 列出下载目录里的文件 |
+| `browser_confirm` | 请用户确认一个不可撤销的动作 |
 
-### Tabs
+### 关于标签页
 
-The sidebar keeps its tab ids internal. The plugin acts on the focused guest, or
-the newest one when nothing is focused, and there is no `tab` argument to aim it
-elsewhere: the parameter used to exist and was silently dropped, which let a
-caller believe it had targeted a specific tab. `browser_tabs` still lists what is
-open.
+侧边栏把标签页 id 留在内部。插件操作的是获得焦点的那个 guest，没有焦点时用最新的那个；
+也没有 `tab` 参数去指别处 —— 这个参数以前存在却被静默丢弃，会让调用方误以为自己指定了
+某个标签页。`browser_tabs` 仍然可以列出当前有哪些。
 
-### Honest limits
+### 说实话的限制
 
-Three things DSH does not let a plugin do, reported as structured results rather
-than silent failures:
+有三件事 DSH 不开放给插件，插件以结构化结果如实报告，而不是假装成功：
 
-- **`browser_tab_close` / `browser_tab_activate`** — the sidebar keeps tab ids
-  internal; the tool tells you to click the tab yourself.
-- **`browser_reset_profile`** — the browser session is not exposed for clearing;
-  the tool returns step-by-step instructions.
-- **Native window screenshots** — the guest renders natively, so there are no
-  pixels at the DOM level. `browser_screenshot` instead asks the page to
-  rasterise its own `<canvas>`/`<svg>`, which is exactly what charts are.
+- **`browser_tab_close` / `browser_tab_activate`** —— 侧边栏的标签 id 是内部的，工具会
+  请你自己去点标签。
+- **`browser_reset_profile`** —— 浏览器会话没有开放清理接口，工具返回操作步骤。
+- **截原生窗口** —— guest 渲染在原生层，DOM 层面没有像素。`browser_screenshot` 改为让
+  页面自己栅格化它的 `<canvas>`/`<svg>`，而这正是图表。
 
-## Security
+## 安全
 
-- The plugin never patches DSH. It reads the DOM the official sidebar browser
-  renders and injects a script into guests the official plugin mounted.
-- `browser_eval` runs arbitrary JavaScript in whatever page is loaded. That is the
-  point of the tool and the reason `allowEval` exists.
-- Actions marked `sensitive` ask the user first while `confirmSensitive` is on.
-  A missing question channel denies rather than allows.
-- The `/dsh-live-browser` route refuses cross-site and non-loopback callers. A
-  local process could still spoof the headers, but it can already read and write
-  the same files as you.
+- 插件不改 DSH。它读官方侧边栏浏览器渲染出来的 DOM，往官方插件挂载的 guest 里注入脚本。
+- `browser_eval` 会在当前加载的任何页面里执行任意 JavaScript。这是这个工具存在的意义，
+  也是 `allowEval` 存在的原因。
+- `confirmSensitive` 开着时，标记为 `sensitive` 的动作会先问用户；没有确认通道时是拒绝，
+  不是放行。
+- `/dsh-live-browser` 路由拒绝跨站与非回环的调用方。本机进程仍能伪造这些头，但它本来就能
+  读写和你一样的文件。
 
-## Tests
+## 测试
 
 ```bash
-node test-all.mjs
+node test/test-all.mjs
 ```
 
-Ten suites. Two groups:
+十个套件，分两类：
 
-- **No browser needed** — tool contracts, the bridge, the client driver, session
-  binding, the tool layer. These run anywhere.
-- **Need a live page** — scenarios, the injected script, chart capture, the
-  end-to-end path. They drive a real page through the CDP harness in
-  `test-fixtures/`, which exists **only** for testing; the shipped plugin never
-  touches Chrome directly. Start one with `node scripts/ensure-browser.mjs`, or
-  let them report `SKIP`.
+- **不需要浏览器** —— 工具契约、桥接、客户端驱动、会话绑定、工具层。任何环境都能跑。
+- **需要真实页面** —— 场景、注入脚本、图表导出、端到端链路。它们通过 `test/fixtures/`
+  里的 CDP 夹具驱动真实页面，这个夹具**只为测试而存在**；实际发的插件从不直接碰 Chrome。
+  用 `node scripts/ensure-browser.mjs` 起一个，或者让它们报 `SKIP`。
 
-`test-rpc-http.mjs` needs a running DSH:
+`test/test-rpc-http.mjs` 需要一个正在运行的 DSH：
 
 ```bash
-node test-rpc-http.mjs "http://127.0.0.1:PORT/?token=..."
+node test/test-rpc-http.mjs "http://127.0.0.1:PORT/?token=..."
 ```
 
-Paths for the test browser can be overridden with `DSH_TEST_CDP_PORT`,
-`DSH_TEST_PROFILE_DIR` and `DSH_TEST_DOWNLOAD_DIR`.
+测试浏览器的路径可以用 `DSH_TEST_CDP_PORT`、`DSH_TEST_PROFILE_DIR`、
+`DSH_TEST_DOWNLOAD_DIR` 覆盖。
 
-## Publish
+## 发布
 
-The plugin is installable straight from GitHub or npm with no registry step. To
-have it listed in the community plugin markets that index GitHub, the repository
-carries the `dsh-plugin` topic; those indexes rescan on their own schedule.
+插件可以直接从 GitHub 或 npm 安装，不需要任何注册步骤。如果要被那些索引 GitHub 的社区
+插件市场收录，仓库带上 `dsh-plugin` topic 即可，它们会按自己的节奏重新扫描。
 
-## License
+## 许可
 
 MIT

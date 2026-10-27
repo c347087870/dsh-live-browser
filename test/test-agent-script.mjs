@@ -5,10 +5,10 @@
  * that proves the agent can actually read and drive a page. It runs in Chrome
  * via CDP here purely as a test harness; the shipped plugin does not use CDP.
  */
-import { BrowserLauncher } from './test-fixtures/chrome.js'
+import { BrowserLauncher } from './fixtures/chrome.js'
 import { testBrowserConfig } from './browser-config.mjs'
-import { BrowserHub } from './test-fixtures/browser.js'
-import { AGENT_SOURCE } from './lib/agent-script.js'
+import { BrowserHub } from './fixtures/browser.js'
+import { AGENT_SOURCE } from '../lib/agent-script.js'
 
 const cfg = testBrowserConfig
 const quiet = { info: () => {}, warn: console.warn, debug: () => {} }

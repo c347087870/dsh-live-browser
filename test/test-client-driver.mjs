@@ -14,8 +14,12 @@
  */
 import { readFileSync } from 'node:fs'
 import { createContext, runInContext } from 'node:vm'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const source = readFileSync('client.js', 'utf8')
+/** Resolve client.js from this file's location, so the suite runs from anywhere. */
+const here = dirname(fileURLToPath(import.meta.url))
+const source = readFileSync(join(here, '..', 'client.js'), 'utf8')
 
 const failures = []
 const check = (label, condition, detail) => {

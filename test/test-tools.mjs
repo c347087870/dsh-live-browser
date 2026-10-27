@@ -3,9 +3,9 @@
  * expected parameter shapes, and reports PANEL_NOT_OPEN instead of hanging when
  * the sidebar browser was never opened.
  */
-import { BrowserBridge } from './lib/bridge.js'
-import { registerBrowserTools, browserToolNames } from './lib/tools.js'
-import { handleEndpoint } from './lib/rpc.js'
+import { BrowserBridge } from '../lib/bridge.js'
+import { registerBrowserTools, browserToolNames } from '../lib/tools.js'
+import { handleEndpoint } from '../lib/rpc.js'
 
 const failures = []
 const check = (label, condition, detail) => {
