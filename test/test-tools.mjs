@@ -114,6 +114,48 @@ check('unknown endpoint is a clean protocol error', unknown.ok === false)
   panelBridge.close()
 }
 
+// ---------------------------------------------------------------------------
+// 定位参数必须真的排到命令里
+// ---------------------------------------------------------------------------
+
+{
+  // 参数声明是白名单，没写进去的会被 additionalProperties:false 丢掉。
+  // browser_press 曾经只声明 key 和 ref，于是 selector 在工具层就不见了，
+  // 按键落在 body 上，编辑键对输入框毫无作用，而返回值看起来一切正常。
+  // 这里在桥接层看它到底排了什么出去。
+  const seenTools = []
+  const seenCtx = {
+    logger: { info() {}, warn() {}, debug() {} },
+    tools: { register: (definition) => seenTools.push(definition) },
+    get: () => undefined,
+  }
+  const seenBridge = new BrowserBridge({ timeoutMs: 2000 })
+  registerBrowserTools(seenCtx, {}, seenBridge, {
+    imageDir: process.env.TEMP ?? '.',
+    readUpload: async () => ({}),
+    downloads: async () => ({ files: [] }),
+  })
+  seenBridge.poll('p-seen', undefined)
+
+  const pressTool = seenTools.find((tool) => tool.name === 'browser_press')
+  const pending = pressTool.execute({ key: 'Backspace', selector: '#e' }, {})
+
+  let dispatched = null
+  for (let attempt = 0; attempt < 50 && dispatched === null; attempt += 1) {
+    dispatched = seenBridge.poll('p-seen')
+    if (dispatched === null) await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+
+  check('press 排出的命令带 selector', dispatched?.params?.selector === '#e', JSON.stringify(dispatched))
+  check('press 排出的命令带 key', dispatched?.params?.key === 'Backspace', JSON.stringify(dispatched))
+
+  if (dispatched !== null) {
+    seenBridge.settle('p-seen', dispatched.id, { ok: true, value: { pressed: 'Backspace' } })
+  }
+  await pending.catch(() => {})
+  seenBridge.close()
+}
+
 bridge.close()
 console.log(failures.length === 0 ? '\nTOOL LAYER OK' : `\nTOOL LAYER FAILED (${failures.length})`)
 process.exit(failures.length === 0 ? 0 : 1)
