@@ -1,10 +1,12 @@
 # Dependencies
 node_modules/
-# npm 锁文件：本仓库用 pnpm，这个文件只是本地安装测试依赖时产生的
-package-lock.json
+# npm 閿佹枃浠讹細鏈粨搴撶敤 pnpm锛岃繖涓枃浠跺彧鏄湰鍦板畨瑁呮祴璇曚緷璧栨椂浜х敓鐨?package-lock.json
 
 # Test scratch space
-tmp-*/
+tmp-*
+tmp-msg.txt
+tmp-api-body.json
+tmp-*.mjs
 test-fixtures/.cache/
 
 # Screenshots and downloads the plugin writes at runtime
