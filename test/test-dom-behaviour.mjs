@@ -233,5 +233,74 @@ async function page(html) {
   check('select with an unknown option errors', String(unknown).includes('没有匹配'), unknown)
 }
 
+// ---------------------------------------------------------------------------
+// Page identity and viewport geometry
+// ---------------------------------------------------------------------------
+
+{
+  const { run } = await page('<h1>Title</h1>')
+  const state = run('state', {})
+  check('state reports a readyState', typeof state.readyState === 'string', state.readyState)
+  check('state reports a viewport object', typeof state.viewport === 'object' && state.viewport !== null, JSON.stringify(state.viewport))
+  check('state viewport carries scroll offsets', typeof state.viewport.scrollY === 'number', JSON.stringify(state.viewport))
+}
+
+// ---------------------------------------------------------------------------
+// Waiting: resolves on a present target, and a miss is reported not thrown
+// ---------------------------------------------------------------------------
+
+{
+  const { agent, window } = await page('<div id="ready">present</div>')
+  // wait() is async, so it must be awaited rather than called synchronously.
+  const hit = await agent.wait({ selector: '#ready', timeoutMs: 500 })
+  check('wait matches an existing selector', hit.matched === true, JSON.stringify(hit))
+
+  const byText = await agent.wait({ text: 'present', timeoutMs: 500 })
+  check('wait matches by text', byText.matched === true, JSON.stringify(byText))
+
+  const miss = await agent.wait({ selector: '#never', timeoutMs: 120 })
+  check('wait reports a miss without throwing', miss.matched === false, JSON.stringify(miss))
+  check('a miss still reports the elapsed wait', typeof miss.waitedMs === 'number', String(miss.waitedMs))
+
+  // "display:none" is a style check, not a geometry one, so it is meaningful
+  // under jsdom even though the layout box is stubbed. A zero-height check would
+  // only be testing the stub.
+  const hidden = window.document.createElement('div')
+  hidden.id = 'hidden'
+  hidden.style.display = 'none'
+  hidden.textContent = 'hidden'
+  window.document.body.appendChild(hidden)
+  const invisible = await agent.wait({ selector: '#hidden', state: 'visible', timeoutMs: 120 })
+  check('wait for visible rejects a display:none element', invisible.matched === false, JSON.stringify(invisible))
+}
+
+// ---------------------------------------------------------------------------
+// Scrolling
+// ---------------------------------------------------------------------------
+
+{
+  const { run, window } = await page('<div style="height:2000px">tall</div>')
+  // jsdom does not scroll, so record the call and verify the reported geometry.
+  let scrolledBy = null
+  window.scrollBy = (dx, dy) => { scrolledBy = { dx, dy } }
+  run('scroll', { dy: 800 })
+  check('scroll forwards the delta to the page', scrolledBy?.dy === 800, JSON.stringify(scrolledBy))
+  run('scroll', { dx: 40, dy: -120 })
+  check('scroll forwards horizontal and negative deltas', scrolledBy?.dx === 40 && scrolledBy?.dy === -120, JSON.stringify(scrolledBy))
+}
+
+// ---------------------------------------------------------------------------
+// Script installation is idempotent, so re-injecting never doubles handlers
+// ---------------------------------------------------------------------------
+
+{
+  const { window, agent } = await page('<button id="i">one</button>')
+  const before = window.__dshRefSeq ?? 0
+  const again = window.eval(AGENT_SOURCE)
+  check('re-installing reuses the existing surface', again?.reused === true, JSON.stringify(again))
+  check('the agent object is unchanged after re-injection', window.__dshBrowserAgent === agent)
+  check('re-installing does not reset the ref counter', (window.__dshRefSeq ?? 0) === before, String(window.__dshRefSeq))
+}
+
 console.log(failures.length === 0 ? '\nDOM BEHAVIOUR OK' : `\nDOM BEHAVIOUR FAILED (${failures.length})`)
 process.exit(failures.length === 0 ? 0 : 1)
