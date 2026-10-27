@@ -99,5 +99,37 @@ for (const tool of tools) {
 }
 
 bridge.close()
+
+// ---------------------------------------------------------------------------
+// 定位参数不能半途丢掉
+// ---------------------------------------------------------------------------
+
+{
+  // 参数声明是白名单：没写进 properties 的会被 additionalProperties:false
+  // 直接丢弃，工具层再往下就只剩 undefined。browser_press 曾经只声明了 ref，
+  // 于是传 selector 会被静默吃掉，按键落在 body 上，编辑键对输入框完全无效，
+  // 而返回值看起来一切正常——这种缺陷只能靠契约检查发现。
+  const locating = [
+    'browser_click',
+    'browser_type',
+    'browser_press',
+    'browser_select',
+    'browser_hover',
+    'browser_read_text',
+  ]
+
+  for (const name of locating) {
+    const tool = tools.find((entry) => entry.name === name)
+    const properties = tool?.parameters?.properties ?? {}
+    const accepts = 'selector' in properties || 'ref' in properties
+    if (accepts) {
+      console.log(`PASS ${name} 接受元素定位参数`)
+    } else {
+      failures.push(name)
+      console.log(`FAIL ${name} 没有声明 ref/selector，调用方的定位会被丢弃`)
+    }
+  }
+}
+
 console.log(failures.length === 0 ? '\nTOOL CONTRACTS OK' : `\nTOOL CONTRACTS FAILED: ${failures.join(', ')}`)
 process.exit(failures.length === 0 ? 0 : 1)
