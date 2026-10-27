@@ -4,6 +4,8 @@ node_modules/
 package-lock.json
 
 # 测试临时文件
+msg.txt
+commit-msg.txt
 tmp-*
 test-fixtures/.cache/
 
