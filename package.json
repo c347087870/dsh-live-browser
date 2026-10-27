@@ -1,70 +1,73 @@
-{
-  "name": "dsh-live-browser",
-  "version": "0.3.0",
-  "description": "Drive DSH's own sidebar browser: real <webview> rendering plus an injected command surface so the agent can click, type, read and scroll the page the human is looking at.",
-  "type": "module",
-  "license": "MIT",
-  "author": "c347087870",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/c347087870/dsh-live-browser.git"
-  },
-  "homepage": "https://github.com/c347087870/dsh-live-browser#readme",
-  "bugs": {
-    "url": "https://github.com/c347087870/dsh-live-browser/issues"
-  },
-  "keywords": [
-    "dsh-plugin",
-    "deepseek-harness",
-    "cordis-plugin",
-    "browser",
-    "browser-automation",
-    "webview",
-    "agent-tools"
-  ],
-  "main": "lib/index.js",
-  "exports": {
-    ".": "./lib/index.js",
-    "./client": "./client.js",
-    "./package.json": "./package.json"
-  },
-  "files": [
-    "lib",
-    "client.js",
-    "cordis.patch.yml",
-    "README.md",
-    "README.zh-CN.md",
-    "LICENSE"
-  ],
-  "engines": {
-    "node": ">=20"
-  },
-  "scripts": {
-    "test": "node test/test-all.mjs"
-  },
-  "dependencies": {
-    "schemastery": "^3.18.0"
-  },
-  "peerDependencies": {
-    "@deepseek-ai/dsh-tools": "*",
-    "@deepseek-ai/dsh-host-webserver": "*"
-  },
-  "peerDependenciesMeta": {
-    "@deepseek-ai/dsh-tools": {
-      "optional": true
-    },
-    "@deepseek-ai/dsh-host-webserver": {
-      "optional": true
-    }
-  },
-  "dsh": {
-    "plugin": true,
-    "kind": "server",
-    "bundle": {
-      "patch": "./cordis.patch.yml"
-    },
-    "client": {
-      "platform": "web"
-    }
-  }
+﻿{
+    "name":  "dsh-live-browser",
+    "version":  "0.3.0",
+    "description":  "Drive DSH\u0027s own sidebar browser: real \u003cwebview\u003e rendering plus an injected command surface so the agent can click, type, read and scroll the page the human is looking at.",
+    "type":  "module",
+    "license":  "MIT",
+    "author":  "c347087870",
+    "repository":  {
+                       "type":  "git",
+                       "url":  "git+https://github.com/c347087870/dsh-live-browser.git"
+                   },
+    "homepage":  "https://github.com/c347087870/dsh-live-browser#readme",
+    "bugs":  {
+                 "url":  "https://github.com/c347087870/dsh-live-browser/issues"
+             },
+    "keywords":  [
+                     "dsh-plugin",
+                     "deepseek-harness",
+                     "cordis-plugin",
+                     "browser",
+                     "browser-automation",
+                     "webview",
+                     "agent-tools"
+                 ],
+    "main":  "lib/index.js",
+    "exports":  {
+                    ".":  "./lib/index.js",
+                    "./client":  "./client.js",
+                    "./package.json":  "./package.json"
+                },
+    "files":  [
+                  "lib",
+                  "client.js",
+                  "cordis.patch.yml",
+                  "README.md",
+                  "README.zh-CN.md",
+                  "LICENSE"
+              ],
+    "engines":  {
+                    "node":  "\u003e=20"
+                },
+    "scripts":  {
+                    "test":  "node test/test-all.mjs"
+                },
+    "dependencies":  {
+                         "schemastery":  "^3.18.0"
+                     },
+    "peerDependencies":  {
+                             "@deepseek-ai/dsh-host-webserver":  "*",
+                             "@deepseek-ai/dsh-tools":  "*"
+                         },
+    "peerDependenciesMeta":  {
+                                 "@deepseek-ai/dsh-tools":  {
+                                                                "optional":  true
+                                                            },
+                                 "@deepseek-ai/dsh-host-webserver":  {
+                                                                         "optional":  true
+                                                                     }
+                             },
+    "dsh":  {
+                "plugin":  true,
+                "kind":  "server",
+                "bundle":  {
+                               "patch":  "./cordis.patch.yml"
+                           },
+                "client":  {
+                               "platform":  "web"
+                           }
+            },
+    "devDependencies":  {
+                            "jsdom":  "^30.1.3"
+                        }
 }
