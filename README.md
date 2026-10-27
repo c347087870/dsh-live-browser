@@ -207,6 +207,10 @@ node test/test-rpc-http.mjs "http://127.0.0.1:PORT/?token=..."
 测试浏览器的路径可以用 `DSH_TEST_CDP_PORT`、`DSH_TEST_PROFILE_DIR`、
 `DSH_TEST_DOWNLOAD_DIR` 覆盖。
 
+> 本地改源码后，**必须重启 DSH**：宿主插件的工具注册只在进程启动时发生，文件变化
+> 不会热生效。重启前 `browser_*` 工具和 `/dsh-live-browser` 路由都不存在（路由返回
+> HTTP 405 就是没加载的信号）。
+
 ## 发布
 
 插件可以直接从 GitHub 或 npm 安装，不需要任何注册步骤。如果要被那些索引 GitHub 的社区
