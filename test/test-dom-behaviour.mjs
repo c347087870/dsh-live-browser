@@ -87,6 +87,26 @@ async function page(html) {
   check('a pointer-only listener receives the click', flag === 'caught', flag)
 }
 
+// A single click must not double-fire: dispatching the pointer pair and the
+// mouse pair is right, but repeating either of them submits a form twice.
+{
+  const { run, read } = await page('<button id="once">once</button>')
+  read("window.__counts = {}")
+  for (const type of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click']) {
+    read(`document.getElementById('once').addEventListener('${type}', () => {
+      window.__counts['${type}'] = (window.__counts['${type}'] || 0) + 1
+    })`)
+  }
+  run('click', { selector: '#once' })
+  const counts = read('JSON.stringify(window.__counts)')
+  const parsed = JSON.parse(counts)
+  check('one click fires pointerdown exactly once', parsed.pointerdown === 1, counts)
+  check('one click fires pointerup exactly once', parsed.pointerup === 1, counts)
+  check('one click fires mousedown exactly once', parsed.mousedown === 1, counts)
+  check('one click fires mouseup exactly once', parsed.mouseup === 1, counts)
+  check('one click fires click exactly once', parsed.click === 1, counts)
+}
+
 // ---------------------------------------------------------------------------
 // Editing keys: keydown alone never changed a field's value
 // ---------------------------------------------------------------------------
