@@ -1,3 +1,16 @@
+/**
+ * 扫掉仓库里所有文本文件的 UTF-8 BOM。
+ *
+ * package.json 一旦带上 BOM，DSH 会报
+ *   Cannot validate installed package ... SyntaxError: ... is not valid JSON
+ * 然后把 package.json、pnpm-lock.yaml 和 node_modules 整体回滚，插件装不上，
+ * 但代码本身毫无问题，现象只是「工具和路由都不存在」，极难排查。
+ *
+ * Windows 上用 PowerShell 的 Set-Content、Out-File 写文件很容易带上 BOM，
+ * 所以这个脚本常备着：
+ *
+ *   npm run strip-bom
+ */
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
