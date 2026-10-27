@@ -191,12 +191,17 @@ DSH 每个 Session 一个侧边栏，插件遵守这个边界：
 node test/test-all.mjs
 ```
 
-十个套件，分两类：
+十二个套件，分两类：
 
-- **不需要浏览器** —— 工具契约、桥接、客户端驱动、会话绑定、工具层。任何环境都能跑。
-- **需要真实页面** —— 场景、注入脚本、图表导出、端到端链路。它们通过 `test/fixtures/`
-  里的 CDP 夹具驱动真实页面，这个夹具**只为测试而存在**；实际发的插件从不直接碰 Chrome。
+- **不需要浏览器** —— 包完整性、工具契约、工具层、桥接、端到端链路、客户端驱动、
+  会话绑定、设置项、DOM 行为。任何环境都能跑，`npm test` 即可。
+- **需要真实页面** —— 场景、注入脚本、图表导出。它们通过 `test/fixtures/` 里的 CDP
+  夹具驱动真实页面，这个夹具**只为测试而存在**；实际发的插件从不直接碰 Chrome。
   用 `node scripts/ensure-browser.mjs` 起一个，或者让它们报 `SKIP`。
+
+「DOM 行为」和「端到端链路」原本也要真浏览器，现在改成在 jsdom 里跑同一份注入脚本，
+所以不需要 Chrome。图表导出没跟着改，因为 jsdom 的 canvas 要额外装原生包 `canvas`，
+为了跑测试把编译依赖架到使用者机器上不划算。
 
 `test/test-rpc-http.mjs` 需要一个正在运行的 DSH：
 
@@ -210,6 +215,28 @@ node test/test-rpc-http.mjs "http://127.0.0.1:PORT/?token=..."
 > 本地改源码后，**必须重启 DSH**：宿主插件的工具注册只在进程启动时发生，文件变化
 > 不会热生效。重启前 `browser_*` 工具和 `/dsh-live-browser` 路由都不存在（路由返回
 > HTTP 405 就是没加载的信号）。
+
+### 文件不能带 BOM
+
+`package.json` 这类文件如果开头混进 UTF-8 BOM，DSH 会报
+
+```
+installation rejected: Cannot validate installed package dsh-live-browser:
+SyntaxError: Unexpected token ... is not valid JSON
+```
+
+然后把 `package.json`、`pnpm-lock.yaml` 和 `node_modules` **整体回滚**——插件装不上，
+但代码本身毫无问题，现象是「工具和路由都不存在」，极难排查。
+
+Windows 上用 PowerShell 的 `Set-Content`、`Out-File` 写文件很容易带上 BOM。仓库里带了
+巡检脚本：
+
+```bash
+npm run strip-bom     # 扫掉全仓库文本文件的 BOM
+```
+
+`test/test-package-integrity.mjs` 也会检查这一点，并核对 `files` 里声明的每个文件是否
+真实存在、`exports` 指向的入口是否存在、运行时代码有没有 `console.log` 残留。
 
 ## 发布
 
