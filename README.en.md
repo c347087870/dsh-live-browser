@@ -12,7 +12,9 @@ cannot click, type, read or scroll it.
 
 This plugin closes that gap **without modifying DSH**: it finds the guests that
 plugin mounted, injects a command surface into each document, and gives the model
-25 `browser_*` tools that operate the page the human is looking at.
+25 `browser_*` tools that operate the page the human is looking at. It also fills
+in the tab's right-click menu: **close other tabs / close all tabs / close tabs to
+the right**.
 
 ## Install
 
@@ -96,6 +98,11 @@ DSH keeps a separate sidebar per Session, and this plugin respects that:
   (`exec.agent.session.id` on the host).
 - A panel only receives commands belonging to its own Session, so a second chat's
   sidebar polling at the same time cannot steal them.
+- A panel only targets the sidebar of the chat **on screen**: background chats keep
+  theirs mounted (`keepMounted`), but those are marked `hidden` and are never
+  mistaken for the page in front of the human.
+- After switching chats, commands belonging to the old chat are refused with an
+  explanation instead of running against a page nobody can see.
 - When the browser has to be opened, it opens in the **requesting** chat via
   `openTabIn(sessionId, …)`, not in whichever chat happens to be on screen.
 
@@ -125,7 +132,7 @@ agent tool call
       ▼
   command queue  ──────►  panel long-polls   client.js
                                 │
-                                ├─ no guest yet → open the sidebar browser
+                                ├─ no guest yet → open the sidebar browser (openTabIn)
                                 ├─ page commands  → injected script in the guest
                                 ├─ browser commands → guest element (loadURL/goBack…)
                                 └─ tab commands   → sidebar service
@@ -133,6 +140,8 @@ agent tool call
                           settle(result)
                                 ▼
                         tool result
+
+right-click a tab ──► decorate the menu (client.js) ──► close others / all / to the right
 ```
 
 - **`lib/bridge.js`** — the queue and the long poll. Cold calls stay queued long
@@ -148,10 +157,15 @@ agent tool call
 - **`lib/config.js` / `lib/schema.js`** — the settings values and the form DSH
   renders. Values are dependency-free so the tool layer and tests can read them
   without a `node_modules` tree.
-- **`client.js`** — finds `webview[data-sidebar-browser-frame="webview"]`, injects
-  the script, opens the tab when needed, and runs the poll loop. IIFE-wrapped:
-  DSH batches plugin bundles into one combo `<script>`, so a top-level `const`
-  would collide with a sibling.
+- **`client.js`** — finds the guest inside **the current conversation's** sidebar
+  (`webview[data-sidebar-browser-frame="webview"]`), injects the script, opens the
+  tab when needed, and runs the poll loop. Background chats keep their sidebars
+  mounted (`keepMounted`) but `hidden`, so they are never mistaken for the one on
+  screen; among several tabs it picks the one that is actually laid out, not the
+  last mounted. It also decorates the tab context menu: a `contextmenu` listener
+  waits for DSH's menu portal and appends the three entries, still without
+  touching DSH. IIFE-wrapped: DSH batches plugin bundles into one combo
+  `<script>`, so a top-level `const` would collide with a sibling.
 
 ### Why not `connection.rpc.handle`
 
@@ -184,10 +198,18 @@ without the broken indirection.
 ### Tabs
 
 The sidebar keeps its tab ids internal. The plugin acts on the focused guest, or
-the newest one when nothing is focused, and there is no `tab` argument to aim it
-elsewhere: the parameter used to exist and was silently dropped, which let a
-caller believe it had targeted a specific tab. `browser_tabs` still lists what is
-open.
+on the tab that is actually laid out in the current chat's sidebar when nothing
+is focused: every visited tab stays mounted, so document order is not what the
+human sees. There is no `tab` argument to aim it elsewhere: the parameter used to
+exist and was silently dropped, which let a caller believe it had targeted a
+specific tab. `browser_tabs` still lists what is open.
+
+The tab's right-click menu gains three entries: **close other tabs**, **close all
+tabs**, and **close tabs to the right** (everything after this tab; the current
+tab stays, and entries with nothing to close are disabled). Order comes from the
+strip of the pane the menu was opened in, so split panes stay independent; the
+menu itself still belongs to DSH. Floating panes have no strip, so they do not get
+these entries.
 
 ### Honest limits
 
@@ -220,15 +242,15 @@ than silent failures:
 node test/test-all.mjs
 ```
 
-Ten suites. Two groups:
+Thirteen suites. Two groups:
 
-- **No browser needed** — tool contracts, the bridge, the client driver, session
-  binding, the tool layer. These run anywhere.
-- **Need a live page** — scenarios, the injected script, chart capture, the
-  end-to-end path. They drive a real page through the CDP harness in
-  `test/fixtures/`, which exists **only** for testing; the shipped plugin never
-  touches Chrome directly. Start one with `node scripts/ensure-browser.mjs`, or
-  let them report `SKIP`.
+- **No browser needed** — package integrity, tool contracts, the tool layer, the
+  bridge, the end-to-end path, the client driver, session binding, the tab menu,
+  settings, DOM behaviour. These run anywhere.
+- **Need a live page** — scenarios and chart capture. They drive a real page
+  through the CDP harness in `test/fixtures/`, which exists **only** for testing;
+  the shipped plugin never touches Chrome directly. Start one with
+  `node scripts/ensure-browser.mjs`, or let them report `SKIP`.
 
 `test/test-rpc-http.mjs` needs a running DSH:
 
@@ -249,6 +271,26 @@ Paths for the test browser can be overridden with `DSH_TEST_CDP_PORT`,
 The plugin is installable straight from GitHub or npm with no registry step. To
 have it listed in the community plugin markets that index GitHub, the repository
 carries the `dsh-plugin` topic; those indexes rescan on their own schedule.
+
+## Changelog
+
+### 0.4.0
+
+- Fixed: the first sidebar in the document was treated as the current chat's
+  sidebar, so the agent could read another chat's / another tab's page. It now
+  follows the sidebar of the chat on screen and the tab that is actually shown.
+- Fixed: after switching chats, commands belonging to the old chat are refused
+  with an explanation instead of running against a page nobody can see.
+- Fixed: `browser_status` / `browser_open_panel` report the panel of the current
+  chat only.
+- Added: tab context menu entries — close other tabs / close all tabs / close tabs
+  to the right.
+- Fixed: `autoOpenPanel` was declared but never honoured; turning it off now stops
+  the automatic open.
+
+### 0.3.0
+
+- Cold-start auto-open, per-session binding, tab listing and chart capture.
 
 ## License
 

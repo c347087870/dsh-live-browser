@@ -62,6 +62,10 @@ check('source script parses', (() => {
 })())
 const statusEndpoint = await handleEndpoint(bridge, 'status', {})
 check('status endpoint works', statusEndpoint.ok === true && statusEndpoint.value.attached === false)
+const configEndpoint = await handleEndpoint(bridge, 'config', {}, { config: { autoOpenPanel: false } })
+check('config endpoint carries autoOpenPanel', configEndpoint.ok === true && configEndpoint.value?.autoOpenPanel === false, JSON.stringify(configEndpoint))
+const defaultConfig = await handleEndpoint(bridge, 'config', {}, {})
+check('config defaults to auto-open', defaultConfig.value?.autoOpenPanel === true, JSON.stringify(defaultConfig))
 const unknown = await handleEndpoint(bridge, 'nope', {})
 check('unknown endpoint is a clean protocol error', unknown.ok === false)
 

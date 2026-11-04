@@ -38,18 +38,37 @@ const buildWindow = (options = {}) => {
   /**
    * The conversation the fake sidebar is showing.
    *
-   * `current` mirrors the real `data-sidebar-right-session` marker; tests change
-   * it to simulate the user switching chats mid-request.
+   * `current` mirrors which `data-sidebar-right-session` wrapper is visible;
+   * tests change it to simulate the user switching chats mid-request.
    */
   const session = { current: options.sessionId ?? 'session-A' }
 
+  /** The sidebar of one conversation. DSH renders one per chat it has visited. */
+  const views = []
+  const addView = (sessionId) => {
+    const view = { sessionId, guests: [] }
+    view.element = {
+      dataset: { sidebarRightSession: sessionId },
+      isConnected: true,
+      // A background conversation's sidebar stays mounted but is marked hidden.
+      hasAttribute: (name) => name === 'hidden' && session.current !== sessionId,
+      closest: () => null,
+      querySelectorAll: (selector) =>
+        selector.includes('webview') ? view.guests.filter((guest) => guest.isConnected) : [],
+    }
+    views.push(view)
+    return view
+  }
+
   /** A stand-in <webview>: records injections and reports a URL. */
-  const makeGuest = () => {
+  const makeGuest = (view = views[0]) => {
     const element = {
       tagName: 'WEBVIEW',
       isConnected: true,
       parentElement: null,
       style: {},
+      /** Set for a tab that is mounted but not the active one. */
+      backgroundTab: false,
       getURL: () => 'https://page.test/',
       getTitle: () => 'Page',
       isLoading: () => false,
@@ -60,6 +79,16 @@ const buildWindow = (options = {}) => {
       goForward: () => {},
       reload: () => {},
       remove: () => { element.isConnected = false },
+      getBoundingClientRect: () => {
+        const shown = session.current === view.sessionId && element.backgroundTab !== true
+        return shown
+          ? { x: 0, y: 0, width: 800, height: 600, top: 0, left: 0, right: 800, bottom: 600 }
+          : { x: 0, y: 0, width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0 }
+      },
+      closest: (selector) =>
+        selector === '[hidden]' && (session.current !== view.sessionId || element.backgroundTab === true)
+          ? {}
+          : null,
       addEventListener: (name, handler) => {
         listeners.set(`${element.id}:${name}`, handler)
       },
@@ -74,17 +103,24 @@ const buildWindow = (options = {}) => {
     }
     element.id = `guest-${guests.length}`
     guests.push(element)
+    view.guests.push(element)
     return element
   }
 
+  // The conversation on screen always has a sidebar, even before it renders one.
+  addView(session.current)
+
   const document = {
     activeElement: null,
-    querySelectorAll: (selector) => (selector.includes('webview') ? guests.filter((g) => g.isConnected) : []),
-    // The sidebar wrapper carries the conversation id, like the shipped one.
+    querySelectorAll: (selector) => {
+      if (selector.includes('webview')) return views.flatMap((view) => view.guests).filter((g) => g.isConnected)
+      if (selector.includes('data-sidebar-right-session')) return views.map((view) => view.element)
+      return []
+    },
+    // DSH sorts the mounted sidebars by session id, so the first match is not
+    // necessarily the one on screen. The driver must not rely on this.
     querySelector: (selector) =>
-      selector.includes('data-sidebar-right-session') && session.current !== undefined
-        ? { dataset: { sidebarRightSession: session.current } }
-        : null,
+      selector.includes('data-sidebar-right-session') ? views[0]?.element ?? null : null,
     createElement: () => makeGuest(),
     getElementById: () => null,
   }
@@ -108,6 +144,8 @@ const buildWindow = (options = {}) => {
   return {
     window,
     guests,
+    views,
+    addView,
     session,
     openedUrls,
     get openedCount() { return openedCount },
@@ -118,12 +156,15 @@ const buildWindow = (options = {}) => {
 }
 
 /** A tiny cordis-like context the bundle's apply() expects. */
-const makeCtx = (sidebar) => {
+const makeCtx = (sidebar, sessionKey) => {
   const effects = []
   return {
     effects,
     reflect: { get: (name) => (name === 'sidebarRight' ? sidebar : undefined) },
-    get: () => undefined,
+    get: (name) =>
+      name === 'uiSession' && sessionKey !== undefined
+        ? { adapter: { current: { getSnapshot: () => ({ key: sessionKey }) } } }
+        : undefined,
     effect: (fn) => {
       const dispose = fn()
       effects.push(dispose)
@@ -138,7 +179,7 @@ const makeCtx = (sidebar) => {
  * @param {object} harness from buildWindow
  * @param {object} bridgeImpl fake transport
  */
-const bootClient = async (harness, bridgeImpl, sidebar) => {
+const bootClient = async (harness, bridgeImpl, sidebar, sessionKey) => {
   // The bundle talks to the host through fetch; swap in the fake transport.
   const responses = []
   harness.window.fetch = async (url, init) => {
@@ -165,7 +206,7 @@ const bootClient = async (harness, bridgeImpl, sidebar) => {
   context.fetch = harness.window.fetch
   runInContext(source, context)
 
-  const ctx = makeCtx(sidebar)
+  const ctx = makeCtx(sidebar, sessionKey)
   captured.exports.apply(ctx)
   return { ctx, captured, responses }
 }
@@ -228,6 +269,27 @@ console.log('\n--- auto-open: cold start --------------------------------------'
   check('it forwards the requested url when navigating', harness.openedUrls[0] === 'https://page.test/', JSON.stringify(harness.openedUrls))
 }
 
+console.log('\n--- auto-open: the setting is honoured -------------------------')
+
+{
+  const harness = buildWindow()
+  let queue = [{ id: '1', method: 'navigate', params: { url: 'https://page.test/' } }]
+  const settled = []
+  const bridgeImpl = async (method, payload) => {
+    if (method === 'source') return { ok: true, value: { source: 'window.__dshBrowserAgent={};' } }
+    if (method === 'config') return { ok: true, value: { autoOpenPanel: false } }
+    if (method === 'poll') return { ok: true, value: queue.shift() ?? null }
+    if (method === 'settle') { settled.push(payload); return { ok: true, value: null } }
+    return { ok: true, value: null }
+  }
+  const sidebar = { openTab: () => harness.markOpened('unexpected') }
+  await bootClient(harness, bridgeImpl, sidebar)
+  const reported = await waitFor(() => settled.length > 0)
+  check('a disabled auto-open still answers the caller', reported === true)
+  check('nothing is opened when the setting is off', harness.openedCount === 0, String(harness.openedCount))
+  check('the failure names the setting', String(settled[0]?.outcome?.error ?? '').includes('自动打开面板'), JSON.stringify(settled[0]?.outcome))
+}
+
 console.log('\n--- the panel reports which chat it is --------------------------')
 
 {
@@ -243,6 +305,122 @@ console.log('\n--- the panel reports which chat it is --------------------------
   await bootClient(harness, bridgeImpl, { openTab: () => {}, openTabIn: () => {} })
   await waitFor(() => polled.length > 2, 2000)
   check('poll carries the conversation id', polled[0] === 'session-A', JSON.stringify(polled[0]))
+}
+
+console.log('\n--- the chat on screen is not the first sidebar in the DOM ------')
+
+{
+  // DSH sorts the mounted sidebars by session id, so the alphabetically first
+  // chat is the first match even when another chat is the one being shown.
+  const harness = buildWindow({ sessionId: 'session-A' })
+  const shownView = harness.addView('session-Z')
+  harness.session.current = 'session-Z'
+  const background = harness.makeGuest(harness.views[0])
+  background.addEventListener = () => {}
+  const shown = harness.makeGuest(shownView)
+  shown.addEventListener = () => {}
+
+  const settled = []
+  const polled = []
+  let queue = [{ id: '1', method: 'readText', params: {}, sessionId: 'session-Z' }]
+  const bridgeImpl = async (method, payload) => {
+    if (method === 'source') return { ok: true, value: { source: 'window.__dshBrowserAgent={};' } }
+    if (method === 'poll') { polled.push(payload.sessionId); return { ok: true, value: queue.shift() ?? null } }
+    if (method === 'settle') { settled.push(payload); return { ok: true, value: null } }
+    return { ok: true, value: null }
+  }
+  await bootClient(harness, bridgeImpl, { openTab: () => {}, openTabIn: () => {} }, 'session-Z')
+  const done = await waitFor(() => settled.length > 0)
+  check('the command completes', done === true, JSON.stringify(settled[0]))
+  check('the panel reports the chat on screen, not the first in the DOM', polled[0] === 'session-Z', JSON.stringify(polled[0]))
+  check('it drives the page of the chat on screen', shown.lastExpression !== undefined)
+  check('it never touches the background chat page', background.lastExpression === undefined)
+}
+
+console.log('\n--- the tab on screen wins over a newer background tab ----------')
+
+{
+  const harness = buildWindow({ sessionId: 'session-A' })
+  const active = harness.makeGuest()
+  active.addEventListener = () => {}
+  // The browser tab is keepMounted: a tab opened later stays in the DOM even
+  // while another tab is the one the human is looking at.
+  const newer = harness.makeGuest()
+  newer.backgroundTab = true
+  newer.addEventListener = () => {}
+
+  const settled = []
+  let queue = [{ id: '1', method: 'readText', params: {}, sessionId: 'session-A' }]
+  const bridgeImpl = async (method, payload) => {
+    if (method === 'source') return { ok: true, value: { source: 'window.__dshBrowserAgent={};' } }
+    if (method === 'poll') return { ok: true, value: queue.shift() ?? null }
+    if (method === 'settle') { settled.push(payload); return { ok: true, value: null } }
+    return { ok: true, value: null }
+  }
+  await bootClient(harness, bridgeImpl, { openTab: () => {}, openTabIn: () => {} })
+  const done = await waitFor(() => settled.length > 0)
+  check('the command completes', done === true, JSON.stringify(settled[0]))
+  check('it drives the visible tab', active.lastExpression !== undefined)
+  check('it does not drive the mounted but hidden tab', newer.lastExpression === undefined)
+}
+
+console.log('\n--- a parked poll cannot run a command after a chat switch ----')
+
+{
+  const harness = buildWindow({ sessionId: 'session-A' })
+  const hidden = harness.makeGuest()
+  hidden.addEventListener = () => {}
+  // The user switches chats while the panel is parked on the old long poll, so
+  // the bridge still has the panel registered against chat A.
+  harness.addView('session-B')
+  harness.session.current = 'session-B'
+
+  const settled = []
+  const bridgeImpl = async (method, payload) => {
+    if (method === 'source') return { ok: true, value: { source: 'window.__dshBrowserAgent={};' } }
+    if (method === 'poll') {
+      // The host hands chat A's command to a panel now showing chat B.
+      return { ok: true, value: { id: '1', method: 'readText', params: {}, sessionId: 'session-A' } }
+    }
+    if (method === 'settle') { settled.push(payload); return { ok: true, value: null } }
+    return { ok: true, value: null }
+  }
+  await bootClient(harness, bridgeImpl, { openTab: () => {}, openTabIn: () => {} })
+  const done = await waitFor(() => settled.length > 0)
+  check('the stale command is refused', done === true, JSON.stringify(settled[0]))
+  check('the refusal names the chat switch', String(settled[0]?.outcome?.error ?? '').includes('另一个对话'), JSON.stringify(settled[0]?.outcome))
+  check('nothing ran on the now hidden page', hidden.lastExpression === undefined)
+}
+
+console.log('\n--- without a mounted sidebar the current chat is used --------')
+
+{
+  // Cold start before the right sidebar renders: the shell still knows which
+  // conversation is on screen, and the tab must open there.
+  const harness = buildWindow({ sessionId: 'session-A' })
+  harness.views.length = 0
+  const polled = []
+  let queue = [{ id: '1', method: 'navigate', params: { url: 'https://page.test/' }, sessionId: 'session-A' }]
+  const settled = []
+  const openedIn = []
+  const bridgeImpl = async (method, payload) => {
+    if (method === 'source') return { ok: true, value: { source: 'window.__dshBrowserAgent={};' } }
+    if (method === 'poll') { polled.push(payload.sessionId); return { ok: true, value: queue.shift() ?? null } }
+    if (method === 'settle') { settled.push(payload); return { ok: true, value: null } }
+    return { ok: true, value: null }
+  }
+  const sidebar = {
+    openTab: () => openedIn.push('on-screen'),
+    openTabIn: (sessionId) => {
+      openedIn.push(sessionId)
+      setTimeout(() => { harness.addView('session-A'); harness.makeGuest() }, 40)
+    },
+  }
+  await bootClient(harness, bridgeImpl, sidebar, 'session-A')
+  const done = await waitFor(() => settled.length > 0)
+  check('the panel reports the current chat', polled[0] === 'session-A', JSON.stringify(polled[0]))
+  check('the tab opens in that chat', openedIn[0] === 'session-A', JSON.stringify(openedIn))
+  check('the command still completes', done === true, JSON.stringify(settled[0]))
 }
 
 console.log('\n--- switching chats opens the browser in the asking chat --------')
