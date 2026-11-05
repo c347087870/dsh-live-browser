@@ -31,7 +31,12 @@ dsh plugin --profile web add github:c347087870/dsh-live-browser
 
 ### 从 npm 安装
 
-npm 包尚未发布；发布后安装命令为 `dsh plugin --profile web add dsh-live-browser`。
+```bash
+dsh plugin --profile web add dsh-live-browser
+```
+
+包地址：https://www.npmjs.com/package/dsh-live-browser 。装 npm 包的好处是能出现在 DSH
+的「插件中心」里，一键安装。
 
 ### 确认装好了
 

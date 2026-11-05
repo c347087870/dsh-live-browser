@@ -36,8 +36,12 @@ UI instead: **Plugins → Add plugin**, paste
 
 ### From npm
 
-No npm package yet; once published the command is
-`dsh plugin --profile web add dsh-live-browser`.
+```bash
+dsh plugin --profile web add dsh-live-browser
+```
+
+Package page: https://www.npmjs.com/package/dsh-live-browser . Installing from npm
+is what makes the plugin show up in DSH's built-in plugin center.
 
 ### Verify the install
 
