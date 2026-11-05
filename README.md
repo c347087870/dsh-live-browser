@@ -1,5 +1,7 @@
 # dsh-live-browser
 
+[![Listed on dsh-plugin.org](https://dsh-plugin.org/badges/listed.svg)](https://dsh-plugin.org/zh/plugins/c347087870/dsh-live-browser)
+
 让 agent 操作 DSH 自带的那个浏览器 —— 就在 DSH 里，什么都不离开窗口。
 
 中文 | [English](README.en.md)

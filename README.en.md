@@ -1,5 +1,7 @@
 # dsh-live-browser
 
+[![Listed on dsh-plugin.org](https://dsh-plugin.org/badges/listed.svg)](https://dsh-plugin.org/plugins/c347087870/dsh-live-browser)
+
 Let the agent drive the browser DSH already ships — inside DSH, with nothing
 leaving the window.
 
