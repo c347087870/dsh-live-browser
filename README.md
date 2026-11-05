@@ -21,7 +21,7 @@ DSH 会自动注册。
 
 ```bash
 # Web / CLI profile
-dsh plugin --profile web install c347087870/dsh-live-browser
+dsh plugin --profile web add github:c347087870/dsh-live-browser
 ```
 
 桌面版的 profile 由 Electron 应用独占，请从界面安装：**插件 → 添加插件**，粘贴
@@ -29,9 +29,7 @@ dsh plugin --profile web install c347087870/dsh-live-browser
 
 ### 从 npm 安装
 
-```bash
-dsh plugin --profile web install dsh-live-browser
-```
+npm 包尚未发布；发布后安装命令为 `dsh plugin --profile web add dsh-live-browser`。
 
 ### 确认装好了
 

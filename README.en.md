@@ -25,7 +25,7 @@ Requires DSH 0.2.x and Node.js 20 or newer. The plugin declares its DSH bundle i
 
 ```bash
 # Web / CLI profile
-dsh plugin --profile web install c347087870/dsh-live-browser
+dsh plugin --profile web add github:c347087870/dsh-live-browser
 ```
 
 The desktop profile is owned by the Electron application, so install it from the
@@ -34,9 +34,8 @@ UI instead: **Plugins → Add plugin**, paste
 
 ### From npm
 
-```bash
-dsh plugin --profile web install dsh-live-browser
-```
+No npm package yet; once published the command is
+`dsh plugin --profile web add dsh-live-browser`.
 
 ### Verify the install
 
