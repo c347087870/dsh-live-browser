@@ -1,6 +1,6 @@
 {
   "name": "dsh-live-browser",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "让 agent 操作 DSH 自带的侧边栏浏览器：真实 webview 渲染，注入命令层，可点击、输入、读取和滚动用户眼前那张页面；每个对话各自一页，并补齐标签页右键批量关闭。",
   "type": "module",
   "license": "MIT",

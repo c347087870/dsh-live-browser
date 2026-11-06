@@ -83,19 +83,22 @@ agent 不会先让你去开浏览器，也永远不会去开外部窗口：
 
 所以冷启动时一句 `browser_navigate`，表现就是右侧栏自己弹出一个标签页并加载目标地址。
 
-### 一个对话一个浏览器
+### 每个对话一个浏览器 worker
 
-DSH 每个 Session 一个侧边栏，插件遵守这个边界：
+DSH 每个 Session 一个侧边栏，插件按会话隔离：
 
-- 每条命令都带着发起它的 Session id（宿主侧取 `exec.agent.session.id`）。
-- 面板只收到属于自己 Session 的命令，别的对话的面板同时在轮询也抢不走。
-- 面板只认**屏幕上那个对话**的侧边栏：后台对话的侧边栏还挂在 DOM 里（`keepMounted`），
-  但它们被标了 `hidden`，不能被当成你眼前这一页。
-- 切走对话后，属于旧对话的命令会被拒绝并说明原因，而不是在看不见的页面上继续执行。
+- 每个存活的 Session 都有自己独立的 `panelId` 和长轮询，并固定绑定自己的 Session id。
+- 每条命令都带着发起它的 Session id（宿主侧取 `exec.agent.session.id`）；即使当前屏幕切到
+  别的对话，后台对话的 worker 仍继续轮询，命令仍在它自己的 webview 里执行。
+- 面板只在该 Session 自己的 `[data-sidebar-right-session]` 里找页面，不会操到当前显示的
+  对话；后台对话的侧边栏即使被标了 `hidden` 也不影响执行。
 - 需要打开浏览器时，用 `openTabIn(sessionId, …)` 在**发起请求的那个对话**里打开，
   而不是在屏幕上恰好显示的那个对话里。
+- 同一 Session 有多个标签时，挑真正有布局盒子的那个，而不是最后挂载的那个。
+- Web 版的 iframe 浏览器与 DSH 跨域，插件无法注入脚本：`browser_status` 会返回
+  `mode: "iframe"` 并给出提示，右下角也会指导用户改用桌面版 webview。
 
-这消除了老的故障模式：在 A 对话要页面，没等它出来就切到 B，结果浏览器出现在 B。
+这消除了老的故障模式：在 A 对话要页面，没等它出来就切到 B，结果命令被拒绝或浏览器出现在 B。
 
 > 为什么打开动作放在渲染层：侧边栏整个在客户端，它的宿主模块什么都不贡献，所以没有
 > 宿主服务可调。客户端那一半通过 `ctx.reflect.provide` 发布 `sidebarRight`，插件用的就是这个。
@@ -139,13 +142,12 @@ DSH 每个 Session 一个侧边栏，插件遵守这个边界：
   也能读文件（`readUpload`）。
 - **`lib/config.js` / `lib/schema.js`** —— 配置值与 DSH 渲染的表单。取值部分不依赖第三方包，
   所以工具层和测试不需要 `node_modules` 就能跑。
-- **`client.js`** —— 找到**当前对话**那个侧边栏里的
-  `webview[data-sidebar-browser-frame="webview"]`，注入脚本，需要时打开标签页，跑轮询循环。
-  后台对话的侧边栏还挂在 DOM 里（`keepMounted`），但被标了 `hidden`，插件不会误认；
-  同一栏里有多个标签时，挑真正有布局盒子的那个，而不是最后挂载的那个。标签页右键菜单
-  也在这里补三项：监听 `contextmenu`，等 DSH 的菜单 portal 出现后追加按钮，仍然不改 DSH。
-  整体包在 IIFE 里：DSH 会把多个插件 bundle 塞进同一个 combo `<script>`，顶层 `const`
-  会跟邻居撞名。
+- **`client.js`** —— 为每个存活的对话维护一个 worker：找到该对话侧边栏里的
+  `webview[data-sidebar-browser-frame="webview"]`，注入脚本，需要时打开标签页，各自跑轮询。
+  后台对话的侧边栏还挂在 DOM 里（`keepMounted`），它们的 worker 继续工作；同一栏里有多个
+  标签时，挑真正有布局盒子的那个，而不是最后挂载的那个。标签页右键菜单也在这里补三项：
+  监听 `contextmenu`，等 DSH 的菜单 portal 出现后追加按钮，仍然不改 DSH。整体包在 IIFE 里：
+  DSH 会把多个插件 bundle 塞进同一个 combo `<script>`，顶层 `const` 会跟邻居撞名。
 
 ### 为什么不用 `connection.rpc.handle`
 
@@ -298,6 +300,18 @@ npm run strip-bom     # 扫掉全仓库文本文件的 BOM
 插件市场收录，仓库带上 `dsh-plugin` topic 即可，它们会按自己的节奏重新扫描。
 
 ## 更新记录
+
+### 0.5.0
+
+- 新增：按对话独立轮询。每个存活 Session 一个 worker/panel，切走对话后原对话的命令仍在
+  自己的 webview 中执行，不再被拒绝或串到当前对话。
+- 修复：快速切换对话、最小化窗口、新开对话时命令丢失/超时/操作错页面的问题。
+- 新增：Web 版 iframe 浏览器检测与右下角提示，`browser_status` 返回 `mode:"iframe"`，
+  引导用户改用桌面版 webview。
+- 修复：`browser_open_panel` 通过客户端 `openPanel` 在发起对话里打开标签页；宿主侧 opener
+  作为兜底。
+- 修复：内置 `dsh-live-browser` skill 的 `source` 字段，DSH 0.2.x 可正常加载。
+- 测试：单对话、双对话隔离、快速切换 12 次、最小化/恢复、全屏、后台导航全部通过。
 
 ### 0.4.0
 

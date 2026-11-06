@@ -95,24 +95,28 @@ external window:
 So `browser_navigate` on a cold start shows up as a sidebar tab that opens by
 itself and loads the requested page.
 
-### One browser per conversation
+### One browser worker per conversation
 
-DSH keeps a separate sidebar per Session, and this plugin respects that:
+DSH gives every Session its own sidebar, and this plugin isolates by Session:
 
+- Every live Session gets its own `panelId` and long poll, permanently bound to that
+  Session id.
 - Every command carries the Session id of the chat that issued it
-  (`exec.agent.session.id` on the host).
-- A panel only receives commands belonging to its own Session, so a second chat's
-  sidebar polling at the same time cannot steal them.
-- A panel only targets the sidebar of the chat **on screen**: background chats keep
-  theirs mounted (`keepMounted`), but those are marked `hidden` and are never
-  mistaken for the page in front of the human.
-- After switching chats, commands belonging to the old chat are refused with an
-  explanation instead of running against a page nobody can see.
+  (`exec.agent.session.id` on the host). Background chats keep polling, so a command
+  still runs in that chat's own webview even after the user switches away.
+- A worker only looks inside its own Session's `[data-sidebar-right-session]`; it
+  never touches the chat currently on screen. A background sidebar marked `hidden`
+  does not stop execution.
 - When the browser has to be opened, it opens in the **requesting** chat via
   `openTabIn(sessionId, …)`, not in whichever chat happens to be on screen.
+- With several tabs in one Session, the one with a real layout box wins, not the
+  last mounted one.
+- A Web-build iframe is cross-origin to DSH and cannot be scripted:
+  `browser_status` returns `mode: "iframe"` and the plugin shows a bottom-right
+  notice pointing the user to the Desktop webview.
 
-That is what stops the old failure mode: ask for a page in chat A, switch to chat
-B before it opens, and find the browser in B.
+That stops the old failure mode: ask for a page in chat A, switch to chat B, and
+have the command refused or the browser appear in B.
 
 > Why the renderer does the opening: the sidebar lives entirely in the client —
 > its host module contributes nothing — so there is no host service to call. The
@@ -278,6 +282,22 @@ have it listed in the community plugin markets that index GitHub, the repository
 carries the `dsh-plugin` topic; those indexes rescan on their own schedule.
 
 ## Changelog
+
+### 0.5.0
+
+- New: one poll worker per conversation. Every live Session has its own panel and
+  long poll, so a command still runs in that chat's webview after the user switches
+  chats instead of being refused or hitting the visible chat.
+- Fixed: lost/timed-out commands and cross-chat page operations during rapid chat
+  switches, window minimize, and new conversations.
+- New: Web-build iframe detection, a bottom-right notice, and `browser_status`
+  returning `mode:"iframe"` with instructions to use the Desktop webview.
+- Fixed: `browser_open_panel` opens via the client `openPanel` command in the
+  requesting chat, with the host opener as fallback.
+- Fixed: the embedded `dsh-live-browser` skill's `source` field so DSH 0.2.x can
+  load it.
+- Tested: single chat, two-chat isolation, 12 rapid chat switches, minimize/restore,
+  fullscreen, and background navigation.
 
 ### 0.4.0
 

@@ -364,32 +364,39 @@ console.log('\n--- the tab on screen wins over a newer background tab ----------
   check('it does not drive the mounted but hidden tab', newer.lastExpression === undefined)
 }
 
-console.log('\n--- a parked poll cannot run a command after a chat switch ----')
+console.log('\n--- a background chat keeps working after a chat switch ----')
 
 {
   const harness = buildWindow({ sessionId: 'session-A' })
   const hidden = harness.makeGuest()
   hidden.addEventListener = () => {}
-  // The user switches chats while the panel is parked on the old long poll, so
-  // the bridge still has the panel registered against chat A.
-  harness.addView('session-B')
+  // The user switches chats; chat A's sidebar stays mounted and its worker
+  // must still receive and run chat A's command.
+  const shownView = harness.addView('session-B')
+  const visible = harness.makeGuest(shownView)
+  visible.addEventListener = () => {}
   harness.session.current = 'session-B'
 
   const settled = []
+  let queued = true
   const bridgeImpl = async (method, payload) => {
     if (method === 'source') return { ok: true, value: { source: 'window.__dshBrowserAgent={};' } }
     if (method === 'poll') {
-      // The host hands chat A's command to a panel now showing chat B.
-      return { ok: true, value: { id: '1', method: 'readText', params: {}, sessionId: 'session-A' } }
+      // The bridge routes chat A's command to the panel bound to chat A.
+      if (payload.sessionId === 'session-A' && queued === true) {
+        queued = false
+        return { ok: true, value: { id: '1', method: 'readText', params: {}, sessionId: 'session-A' } }
+      }
+      return { ok: true, value: null }
     }
     if (method === 'settle') { settled.push(payload); return { ok: true, value: null } }
     return { ok: true, value: null }
   }
   await bootClient(harness, bridgeImpl, { openTab: () => {}, openTabIn: () => {} })
   const done = await waitFor(() => settled.length > 0)
-  check('the stale command is refused', done === true, JSON.stringify(settled[0]))
-  check('the refusal names the chat switch', String(settled[0]?.outcome?.error ?? '').includes('另一个对话'), JSON.stringify(settled[0]?.outcome))
-  check('nothing ran on the now hidden page', hidden.lastExpression === undefined)
+  check('the background command completes', done === true, JSON.stringify(settled[0]))
+  check('it ran on the hidden chat page', hidden.lastExpression !== undefined)
+  check('it did not run on the visible chat', visible.lastExpression === undefined)
 }
 
 console.log('\n--- without a mounted sidebar the current chat is used --------')

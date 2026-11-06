@@ -26,7 +26,29 @@
   'use strict'
 
   /** Live guests are found by this attribute, owned by the official plugin. */
-  const GUEST_SELECTOR = 'webview[data-sidebar-browser-frame="webview"]'
+  const GUEST_SELECTOR =
+    'webview[data-sidebar-browser-frame="webview"], iframe[data-sidebar-browser-frame="iframe"]'
+
+  /**
+   * What to tell a user whose sidebar rendered the Web build's iframe.
+   *
+   * An iframe is cross-origin to the DSH page, so the parent cannot read its
+   * document or inject the agent script. That is a browser security boundary,
+   * not a missing feature in this plugin; the only full-capability path is the
+   * Desktop build, whose browser tab is an Electron <webview>.
+   */
+  const IFRAME_HINT =
+    '当前右侧栏打开的是 Web 版 iframe 浏览器，页面与 DSH 跨域，浏览器同源策略禁止插件注入脚本，点击/输入/读取/执行脚本都无法工作。' +
+    '请改用 DSH 桌面版的 webview 浏览器：1) 关闭浏览器里的 DSH 页面（地址形如 http://127.0.0.1:54249）；' +
+    '2) 启动 DeepSeek Harness 桌面客户端（Windows 开始菜单里的 DeepSeek Harness，或 D:\\软件\\deepseekHARNESS\\DeepSeek Harness.exe）；' +
+    '3) 在桌面客户端打开同一个会话，点右侧栏「浏览器」标签页。桌面版浏览器是 Electron <webview>，browser_* 工具即可正常操作。'
+
+  const guestKind = (element) =>
+    typeof element?.tagName === 'string' && element.tagName.toLowerCase() === 'iframe'
+      ? 'iframe'
+      : 'webview'
+
+  const isIframeGuest = (element) => guestKind(element) === 'iframe'
 
   /** One per conversation: DSH keeps a sidebar mounted for each chat it visited. */
   const SESSION_SELECTOR = '[data-sidebar-right-session]'
@@ -107,18 +129,66 @@
    *
    * @param {{ bridge: ReturnType<typeof createRuntime>, loadSource: () => Promise<string>, openPanel?: (url?: string, sessionId?: string) => Promise<object>, documentRef?: Document, currentSessionId?: () => string | undefined }} options
    */
-  function createDriver({ bridge, loadSource, openPanel, documentRef, currentSessionId }) {
-    const panelId = `panel-${Math.random().toString(36).slice(2, 10)}`
+  function createDriver({ bridge, loadSource, openPanel, documentRef, currentSessionId, listSessions }) {
+    /** Stable prefix; each conversation gets its own panel id below. */
+    const basePanelId = `panel-${Math.random().toString(36).slice(2, 10)}`
     /** @type {Map<Element, {ready: boolean, installed: boolean, url: string, failure?: string}>} */
     const known = new Map()
+    /**
+     * One long-poll per conversation.
+     *
+     * A single poller used to follow whatever chat was on screen, so switching
+     * chats silently re-bound the only panel and commands queued for the other
+     * chat were rejected. DSH keeps each chat's sidebar mounted; giving every
+     * mounted sidebar its own panel keeps background conversations working.
+     *
+     * @type {Map<string, {panelId: string, timer: any, lastSeen: number, stopped: boolean}>}
+     */
+    const workers = new Map()
     let source = ''
     let stopped = false
-    let busy = false
-    let timer
-    /** Set when the last poll round threw, so the loop backs off once. */
-    let tickFailed = false
+    let discoveryTimer
 
     const scope = () => documentRef ?? (typeof document === 'undefined' ? undefined : document)
+
+    /** One small, dismissible notice for the Web build's iframe browser. */
+    let iframeNotice
+    let iframeNoticeDismissed = false
+    const hideIframeNotice = () => {
+      if (iframeNotice !== undefined && iframeNotice.isConnected) iframeNotice.remove()
+      iframeNotice = undefined
+    }
+    const dismissIframeNotice = () => {
+      iframeNoticeDismissed = true
+      hideIframeNotice()
+    }
+    const showIframeNotice = () => {
+      if (iframeNoticeDismissed) return
+      if (iframeNotice !== undefined && iframeNotice.isConnected) return
+      const doc = scope()
+      if (doc === undefined || doc.body === undefined || doc.body === null) return
+      const notice = doc.createElement('div')
+      notice.dataset.dshLiveBrowserIframeNotice = ''
+      notice.setAttribute('role', 'status')
+      notice.style.cssText =
+        'position:fixed;right:16px;bottom:16px;z-index:2147483647;max-width:440px;' +
+        'padding:12px 14px;border:1px solid #ffd591;border-radius:8px;background:#fff7e6;' +
+        'color:#613400;box-shadow:0 6px 20px rgba(0,0,0,.16);font:13px/1.55 system-ui,sans-serif;'
+      const text = doc.createElement('div')
+      text.textContent =
+        '当前右侧栏是 iframe 浏览器，插件无法执行点击/输入/读取。请改用 DSH 桌面版 webview：' +
+        '关闭浏览器里的 DSH 页面 → 启动 DeepSeek Harness 桌面客户端 → 打开同一会话 → 点右侧栏「浏览器」。'
+      const close = doc.createElement('button')
+      close.type = 'button'
+      close.textContent = '知道了'
+      close.style.cssText =
+        'margin-top:8px;padding:3px 10px;border:1px solid #ffd591;border-radius:5px;' +
+        'background:#fff;color:#613400;font:12px system-ui,sans-serif;cursor:pointer;'
+      close.addEventListener('click', dismissIframeNotice)
+      notice.append(text, close)
+      doc.body.appendChild(notice)
+      iframeNotice = notice
+    }
 
     /**
      * The sidebar the human is looking at.
@@ -137,10 +207,17 @@
      * on. Without a mounted sidebar the shell's current conversation is the only
      * source left, and it is exactly where a cold start has to open the tab.
      */
-    const sessionId = () => {
+    const currentSession = () => {
+      // The shell's own selection is authoritative for the visible tab. It is
+      // only used to decide which sidebar is on screen (and to make sure the
+      // visible chat has a worker before its first browser tab exists); every
+      // worker below polls for a fixed session id, so background chats keep
+      // working while the user is looking elsewhere.
+      const current = currentSessionId?.()
+      if (current !== undefined) return current
       const shown = view()
       if (shown !== undefined) return viewSessionId(shown)
-      return currentSessionId?.()
+      return undefined
     }
 
     /**
@@ -149,14 +226,33 @@
      * A command names its conversation; the guest has to come from that same
      * chat's sidebar even when the user has switched to another one meanwhile.
      */
+    const viewsFor = (target) => {
+      const all = sessionViews(scope())
+      if (target === undefined) {
+        const shown = view()
+        return shown === undefined ? [] : [shown]
+      }
+      return all.filter((candidate) => viewSessionId(candidate) === target)
+    }
+
     const viewFor = (target) => {
-      if (target === undefined) return view()
-      return sessionViews(scope()).find((candidate) => viewSessionId(candidate) === target)
+      const candidates = viewsFor(target)
+      // The same conversation can expose more than one
+      // [data-sidebar-right-session] node (the session wrapper and the panel
+      // itself, which may be portaled). Prefer the one that actually holds the
+      // guest, otherwise a wrapper without a browser would shadow the panel.
+      return (
+        candidates.find((candidate) => candidate.querySelector(GUEST_SELECTOR) !== null) ??
+        candidates[0]
+      )
     }
 
     const findGuests = (target) => {
-      const shown = viewFor(target)
-      return shown === undefined ? [] : [...shown.querySelectorAll(GUEST_SELECTOR)]
+      const guests = []
+      for (const candidate of viewsFor(target)) {
+        guests.push(...candidate.querySelectorAll(GUEST_SELECTOR))
+      }
+      return [...new Set(guests)]
     }
 
     /**
@@ -184,8 +280,13 @@
      * that is not on screen.
      */
     const targetGuest = (target) => {
-      const guests = findGuests(target)
-      if (guests.length === 0) return undefined
+      const all = findGuests(target)
+      if (all.length === 0) return undefined
+      // A desktop build may have both kinds mounted while switching profiles.
+      // Prefer a webview: it is the one this plugin can actually drive.
+      const guests = all.some((element) => !isIframeGuest(element))
+        ? all.filter((element) => !isIframeGuest(element))
+        : all
       const doc = scope()
       const focused = guests.find((element) => element === doc?.activeElement)
       if (focused !== undefined) return focused
@@ -207,7 +308,11 @@
         for (const candidate of findGuests(target)) {
           if (!known.has(candidate)) track(candidate)
         }
-        const ready = findGuests(target).find((candidate) => known.get(candidate)?.ready === true)
+        const candidates = findGuests(target)
+        const ready =
+          candidates.find(
+            (candidate) => !isIframeGuest(candidate) && known.get(candidate)?.ready === true,
+          ) ?? candidates.find((candidate) => known.get(candidate)?.ready === true)
         if (ready !== undefined) return ready
         await new Promise((resolve) => setTimeout(resolve, 100))
       }
@@ -218,6 +323,24 @@
     const track = (element) => {
       const state = { ready: false, installed: false, url: '', failure: undefined }
       known.set(element, state)
+      if (isIframeGuest(element)) {
+        // An iframe has none of the <webview> methods. Its href is readable from
+        // the parent even when its document is not; that is enough to report
+        // "this tab is an iframe" and hand the caller the Desktop hint.
+        const refreshFrame = () => {
+          try {
+            state.url = typeof element.src === 'string' ? element.src : ''
+          } catch {
+            state.url = ''
+          }
+          state.ready = true
+          state.installed = false
+          state.failure = undefined
+        }
+        element.addEventListener('load', refreshFrame)
+        refreshFrame()
+        return
+      }
       const refresh = () => {
         try {
           state.url = element.getURL()
@@ -258,6 +381,10 @@
      * re-evaluating the whole script on every SPA route change.
      */
     const ensureInstalled = async (element) => {
+      // There is no cross-origin scripting surface for an iframe. Returning
+      // false lets `state`/`tabs` answer with the iframe description instead of
+      // pretending the page is merely loading.
+      if (isIframeGuest(element)) return false
       const state = known.get(element)
       if (state === undefined) return false
       if (state.installed) return true
@@ -277,6 +404,28 @@
     }
 
     const describeGuest = (element) => {
+      if (isIframeGuest(element)) {
+        let sameOrigin = false
+        try {
+          sameOrigin = element.contentDocument !== null
+        } catch {
+          sameOrigin = false
+        }
+        return {
+          kind: 'iframe',
+          mode: 'iframe',
+          actionRequired: 'switch-to-desktop-webview',
+          id: typeof element.src === 'string' ? element.src : '',
+          url: typeof element.src === 'string' ? element.src : '',
+          title: element.getAttribute('title') ?? '',
+          canGoBack: false,
+          canGoForward: false,
+          loading: false,
+          sameOrigin,
+          automation: false,
+          hint: IFRAME_HINT,
+        }
+      }
       const state = known.get(element)
       let url = state?.url ?? ''
       let title = ''
@@ -292,7 +441,7 @@
       } catch {
         /* the element is between documents */
       }
-      return { id: url, url, title, canGoBack, canGoForward, loading }
+      return { kind: 'webview', id: url, url, title, canGoBack, canGoForward, loading }
     }
 
     /** Perform one command on the chosen guest. */
@@ -303,6 +452,16 @@
       // a guest element cannot create or close its siblings.
       if (method === 'tabNew' || method === 'tabClose' || method === 'tabActivate') {
         return bridge.tabCommand(method, command.params ?? {})
+      }
+
+      // A Web-build iframe has no scriptable guest. It can still answer what it
+      // is (so browser_status can explain the situation), but every command that
+      // needs the page must stop with the Desktop/webview hint instead of
+      // reporting a generic "still loading".
+      if (isIframeGuest(element)) {
+        if (method === 'state') return describeGuest(element)
+        if (method === 'tabs') return { tabs: findGuests(target).map(describeGuest) }
+        throw new Error(IFRAME_HINT)
       }
 
       // Browser-level commands drive the element, like the toolbar does.
@@ -341,115 +500,237 @@
       return element.executeJavaScript(expression, true)
     }
 
-    const tick = async () => {
-      if (stopped || busy) return
-      busy = true
+    /** Refresh the iframe notice for the sidebar currently on screen. */
+    const updateIframeNotice = (shownSession) => {
+      const guests = shownSession === undefined ? [] : findGuests(shownSession)
+      const hasWebview = guests.some((element) => !isIframeGuest(element))
+      const iframe = hasWebview ? undefined : guests.find((element) => isIframeGuest(element))
+      if (iframe === undefined) {
+        iframeNoticeDismissed = false
+        hideIframeNotice()
+      } else {
+        showIframeNotice()
+      }
+    }
+
+    const stopWorker = (sessionId) => {
+      const worker = workers.get(sessionId)
+      if (worker === undefined) return
+      worker.stopped = true
+      if (worker.timer !== undefined) clearTimeout(worker.timer)
+      workers.delete(sessionId)
+    }
+
+    /**
+     * One request loop for one conversation.
+     *
+     * The panel is bound to `sessionId` for its whole life. It never reads the
+     * chat currently on screen, so switching chats cannot steal or reject a
+     * command that belongs to this conversation.
+     */
+    const tickFor = async (sessionId, worker) => {
+      for (const element of findGuests(sessionId)) {
+        if (!known.has(element)) track(element)
+      }
+      for (const element of [...known.keys()]) {
+        if (!element.isConnected) known.delete(element)
+      }
+
+      let command
       try {
-        // Keep the guest map in step with the DOM. Every mounted conversation's
-        // sidebar counts, not just the visible one: a command can name a chat the
-        // user has just switched away from, and its guest still has to be tracked.
-        for (const shown of sessionViews(scope())) {
-          for (const element of shown.querySelectorAll(GUEST_SELECTOR)) {
-            if (!known.has(element)) track(element)
-          }
-        }
-        for (const element of [...known.keys()]) {
-          if (!element.isConnected) known.delete(element)
-        }
+        command = await bridge.poll(worker.panelId, sessionId)
+      } catch {
+        // A failed long poll (host restarting, page hidden) backs off once.
+        return true
+      }
+      if (command === null || command === undefined) return false
 
-        const command = await bridge.poll(panelId, sessionId())
-        if (command === null || command === undefined) return
+      if (command.sessionId !== undefined && command.sessionId !== sessionId) {
+        await bridge.settle(worker.panelId, command.id, {
+          ok: false,
+          error: `这条命令属于对话 ${command.sessionId}，当前面板绑定的是 ${sessionId}；已拒绝，避免操作到错误页面。`,
+        })
+        return false
+      }
+      const target = sessionId
 
-        // The conversation on screen *now*. The poll above may have been parked
-        // for up to 25 s, so the panel can still be registered against the chat
-        // the user was in when it started; a command handed over in that window
-        // would otherwise run against a page that is no longer visible.
-        const shown = sessionId()
-        if (command.sessionId !== undefined && shown !== undefined && command.sessionId !== shown) {
-          await bridge.settle(panelId, command.id, {
+      // Explicit opener: create the browser tab in this conversation, even
+      // while a different conversation is on screen.
+      if (command.method === 'openPanel') {
+        if (!(await canAutoOpen())) {
+          await bridge.settle(worker.panelId, command.id, {
             ok: false,
-            error: `这条命令属于另一个对话（${command.sessionId}），当前显示的是 ${shown}；为避免操作到看不见的页面，已拒绝。请切回发起命令的对话后重试。`,
+            error:
+              '当前对话的右侧栏还没有网页，且插件设置里关闭了「自动打开面板」；请先手动打开「浏览器」标签页后重试',
           })
-          return
+          return false
         }
-
-        // The sidebar that belongs to the command's own conversation. A command
-        // without one comes from an older caller and belongs to whatever is shown.
-        const target = command.sessionId ?? shown
-
-        // No page on screen: this is the cold-start case. Open the sidebar
-        // browser ourselves (it is the only place the page can render), give the
-        // guest a moment to mount, then run the command against it. The user
-        // never has to open a browser by hand, and nothing leaves DSH.
-        let element = targetGuest(target)
-        if (element === undefined) {
-          if (!(await canAutoOpen())) {
-            await bridge.settle(panelId, command.id, {
-              ok: false,
-              error:
-                '当前对话的右侧栏还没有网页，且插件设置里关闭了「自动打开面板」；请先手动打开「浏览器」标签页后重试',
-            })
-            return
-          }
-          if (openPanel === undefined) {
-            await bridge.settle(panelId, command.id, {
-              ok: false,
-              error: '右侧栏还没有打开任何网页，并且当前环境无法自动打开浏览器',
-            })
-            return
-          }
-          try {
-            await openPanel(
-              command.method === 'navigate' ? command.params?.url : undefined,
-              // Open in the chat that asked, not the chat now on screen.
-              target,
-            )
-          } catch (failure) {
-            await bridge.settle(panelId, command.id, {
-              ok: false,
-              error: `无法自动打开侧边栏浏览器：${String(failure?.message ?? failure)}`,
-            })
-            return
-          }
-          element = await waitForGuest(8000, target)
-          if (element === undefined) {
-            await bridge.settle(panelId, command.id, {
-              ok: false,
-              error: '侧边栏浏览器已打开，但页面还没准备好，请稍后重试',
-            })
-            return
-          }
-        }
-
-        const state = known.get(element)
-        if (state !== undefined && state.failure !== undefined) {
-          // Say what actually went wrong instead of "still loading".
-          await bridge.settle(panelId, command.id, {
+        if (openPanel === undefined) {
+          await bridge.settle(worker.panelId, command.id, {
             ok: false,
-            error: `页面加载失败：${state.failure}`,
+            error: '右侧栏还没有打开任何网页，并且当前环境无法自动打开浏览器',
           })
-          return
+          return false
         }
-        if (state === undefined || !state.ready) {
-          await bridge.settle(panelId, command.id, { ok: false, error: '页面还在加载，请稍后重试' })
-          return
-        }
-
         try {
-          const value = await dispatch(element, command, target)
-          await bridge.settle(panelId, command.id, { ok: true, value: normalizeValue(value) })
+          await openPanel(command.params?.url, target)
         } catch (failure) {
-          await bridge.settle(panelId, command.id, {
+          await bridge.settle(worker.panelId, command.id, {
             ok: false,
-            error: String(failure?.message ?? failure),
+            error: `无法自动打开侧边栏浏览器：${String(failure?.message ?? failure)}`,
           })
+          return false
+        }
+        const opened = await waitForGuest(8000, target)
+        await bridge.settle(worker.panelId, command.id, {
+          ok: true,
+          value: { opened: true, hasPage: opened !== undefined },
+        })
+        return false
+      }
+
+      let element = targetGuest(target)
+      if (element === undefined) {
+        // `state`/`tabs` are status probes; they must not create tabs.
+        if (command.method === 'state') {
+          await bridge.settle(worker.panelId, command.id, { ok: true, value: null })
+          return false
+        }
+        if (command.method === 'tabs') {
+          await bridge.settle(worker.panelId, command.id, { ok: true, value: { tabs: [] } })
+          return false
+        }
+        if (!(await canAutoOpen())) {
+          await bridge.settle(worker.panelId, command.id, {
+            ok: false,
+            error:
+              '当前对话的右侧栏还没有网页，且插件设置里关闭了「自动打开面板」；请先手动打开「浏览器」标签页后重试',
+          })
+          return false
+        }
+        if (openPanel === undefined) {
+          await bridge.settle(worker.panelId, command.id, {
+            ok: false,
+            error: '右侧栏还没有打开任何网页，并且当前环境无法自动打开浏览器',
+          })
+          return false
+        }
+        try {
+          await openPanel(command.method === 'navigate' ? command.params?.url : undefined, target)
+        } catch (failure) {
+          await bridge.settle(worker.panelId, command.id, {
+            ok: false,
+            error: `无法自动打开侧边栏浏览器：${String(failure?.message ?? failure)}`,
+          })
+          return false
+        }
+        element = await waitForGuest(8000, target)
+        if (element === undefined) {
+          await bridge.settle(worker.panelId, command.id, {
+            ok: false,
+            error: '侧边栏浏览器已打开，但页面还没准备好，请稍后重试',
+          })
+          return false
+        }
+      }
+
+      const state = known.get(element)
+      if (state !== undefined && state.failure !== undefined) {
+        // Say what actually went wrong instead of "still loading".
+        await bridge.settle(worker.panelId, command.id, {
+          ok: false,
+          error: `页面加载失败：${state.failure}`,
+        })
+        return false
+      }
+      if (state === undefined || !state.ready) {
+        await bridge.settle(worker.panelId, command.id, {
+          ok: false,
+          error: '页面还在加载，请稍后重试',
+        })
+        return false
+      }
+
+      try {
+        const value = await dispatch(element, command, target)
+        await bridge.settle(worker.panelId, command.id, {
+          ok: true,
+          value: normalizeValue(value),
+        })
+      } catch (failure) {
+        await bridge.settle(worker.panelId, command.id, {
+          ok: false,
+          error: String(failure?.message ?? failure),
+        })
+      }
+      return false
+    }
+
+    const startWorker = (sessionId) => {
+      const worker = {
+        panelId: `${basePanelId}-${sessionId}`,
+        timer: undefined,
+        lastSeen: Date.now(),
+        stopped: false,
+      }
+      const loop = async () => {
+        if (stopped || worker.stopped) return
+        let retry = false
+        try {
+          retry = await tickFor(sessionId, worker)
+        } catch {
+          retry = true
+        }
+        if (stopped || worker.stopped) return
+        worker.timer = setTimeout(() => {
+          void loop()
+        }, retry ? POLL_RETRY_MS : 0)
+      }
+      void loop()
+      return worker
+    }
+
+    /**
+     * Keep one worker per mounted conversation.
+     *
+     * A conversation whose sidebar is hidden is still mounted by DSH; its
+     * worker keeps polling, which is what lets a command finish there while the
+     * user is reading another chat.
+     */
+    const syncWorkers = () => {
+      if (stopped) return
+      const visible = currentSession()
+      const ids = new Set()
+      if (visible !== undefined) ids.add(visible)
+      for (const view of sessionViews(scope())) {
+        const id = viewSessionId(view)
+        if (id !== undefined) ids.add(id)
+      }
+      // A conversation with no browser tab has no sidebar to discover. Include
+      // every live session so a cold-start navigate can create its tab even
+      // while another conversation is on screen.
+      try {
+        for (const session of listSessions?.() ?? []) {
+          const id = typeof session === 'string' ? session : session?.id
+          if (typeof id === 'string' && id !== '') ids.add(id)
         }
       } catch {
-        // Back off once so a persistently broken endpoint cannot spin.
-        tickFailed = true
-      } finally {
-        busy = false
+        // Optional service; the DOM/current session still cover the common case.
       }
+      for (const id of ids) {
+        let worker = workers.get(id)
+        if (worker === undefined) {
+          worker = startWorker(id)
+          workers.set(id, worker)
+        }
+        worker.lastSeen = Date.now()
+      }
+      // A closed chat leaves the DOM immediately but its worker may still hold
+      // a queued command for a few seconds; keep it through that grace period.
+      for (const [id, worker] of [...workers]) {
+        if (!ids.has(id) && Date.now() - worker.lastSeen > 30000) stopWorker(id)
+      }
+      updateIframeNotice(visible)
     }
 
     return {
@@ -465,25 +746,16 @@
           }
         }
         if (stopped) return
-        // Long poll: one request stays open until there is work. The loop only
-        // sleeps after a failure, so a healthy idle panel makes no requests.
-        const loop = async () => {
-          if (stopped) return
-          try {
-            await tick()
-          } finally {
-            if (stopped) return
-            const wait = tickFailed === true ? POLL_RETRY_MS : 0
-            tickFailed = false
-            timer = setTimeout(() => { void loop() }, wait)
-          }
-        }
-        void loop()
+        syncWorkers()
+        discoveryTimer = setInterval(syncWorkers, 500)
       },
       stop() {
         stopped = true
-        clearTimeout(timer)
+        if (discoveryTimer !== undefined) clearInterval(discoveryTimer)
+        for (const id of [...workers.keys()]) stopWorker(id)
         known.clear()
+        iframeNoticeDismissed = false
+        hideIframeNotice()
       },
     }
   }
@@ -537,10 +809,20 @@
    * @returns {Element | undefined}
    */
   function foregroundSessionView(documentRef) {
-    return sessionViews(documentRef).find((view) => {
+    const views = sessionViews(documentRef).filter((view) => {
       if (typeof view.hasAttribute === 'function' && view.hasAttribute('hidden')) return false
-      return typeof view.closest !== 'function' || view.closest('[hidden]') === null
+      if (typeof view.closest === 'function' && view.closest('[hidden]') !== null) return false
+      // Background sessions may be hidden with CSS rather than the `hidden`
+      // attribute, and a portaled panel can keep a non-zero box there. A view
+      // that is not laid out is not the one the human is looking at.
+      return isLaidOut(view)
     })
+    const active = documentRef?.activeElement
+    const focused =
+      active === undefined || active === null
+        ? undefined
+        : views.find((view) => typeof view.contains === 'function' && view.contains(active))
+    return focused ?? views[0]
   }
 
   /**
@@ -809,6 +1091,13 @@
         // itself, inside the requesting conversation.
         openPanel: (url, sessionId) => openSidebarBrowser(ctx, sessionId, url),
         currentSessionId: () => currentSessionId(ctx),
+        listSessions: () => {
+          try {
+            return ctx.get?.('sessions')?.list?.() ?? []
+          } catch {
+            return []
+          }
+        },
       })
       void driver.start()
       return () => driver.stop()
